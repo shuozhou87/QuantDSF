@@ -1,0 +1,201 @@
+import sys, os
+# Workaround for when this script is named streamlit.py to avoid circular import
+curdir = os.path.dirname(__file__)
+if curdir in sys.path:
+    sys.path.remove(curdir)
+import streamlit as st
+# Restore path
+sys.path.insert(0, curdir)
+
+import zipfile
+import io
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import savgol_filter
+from scipy.optimize import curve_fit
+from scipy.stats import t
+
+st.set_page_config(page_title="nanoDSF Tm Calculator", layout="wide")
+st.title("nanoDSF Tₘ Calculation App")
+
+# Sidebar for user options
+st.sidebar.header("Analysis Settings")
+method = st.sidebar.selectbox(
+    "Select Tₘ calculation method:",
+    ["Two-state Boltzmann (default)", "First derivative"]
+)
+channel = st.sidebar.selectbox(
+    "Select data channel:",
+    ["350/330 nm ratio (default)", "350 nm", "330 nm"]
+)
+if method.startswith("First derivative"):
+    window = st.sidebar.number_input(
+        "Savitzky–Golay window length:", min_value=5, max_value=101, step=2, value=21
+    )
+
+# File uploader
+uploaded = st.file_uploader("Upload nanoDSF ZIP data", type="zip")
+if not uploaded:
+    st.info("Please upload a ZIP archive containing your CSV files.")
+    st.stop()
+
+# Utility functions
+
+def calc_tm_derivative(T, F, window):
+    smooth = savgol_filter(F, window_length=window, polyorder=3)
+    deriv = np.gradient(smooth, T)
+    idx = np.argmax(deriv[10:-10]) + 10
+    return T[idx], smooth, deriv
+
+
+def boltzmann_exp(T, A_N, alpha, D_N, A_D, beta, D_D, Tm, k):
+    F_N = A_N * np.exp(-alpha * T) + D_N
+    F_D = A_D * np.exp(-beta * T) + D_D
+    return F_N + (F_D - F_N) / (1 + np.exp((Tm - T) / k))
+
+
+def calc_tm_boltzmann(T, F):
+    p0 = [F[0]-np.min(F), 0.01, np.min(F), np.max(F)-np.min(F), 0.005, np.min(F), np.median(T), 2.0]
+    try:
+        popt, pcov = curve_fit(boltzmann_exp, T, F, p0=p0, maxfev=20000)
+    except RuntimeError:
+        return np.nan, (np.nan, np.nan), np.nan, np.nan, np.nan, None, None
+    Tm = popt[6]
+    se = np.sqrt(np.diag(pcov))[6]
+    dfree = len(T) - len(popt)
+    tval = t.ppf(0.975, dfree)
+    ci = (Tm - tval*se, Tm + tval*se)
+    y_pred = boltzmann_exp(T, *popt)
+    residuals = F - y_pred
+    ss_res = np.sum(residuals**2)
+    ss_tot = np.sum((F - np.mean(F))**2)
+    r2 = 1 - ss_res/ss_tot
+    folded = np.mean(F[:10])
+    unfolded = np.mean(F[-10:])
+    snr = abs(unfolded-folded) / np.std(residuals)
+    return Tm, ci, se, snr, r2, popt, pcov
+
+# Process ZIP and compute results
+results = []
+cap_data = {}
+with zipfile.ZipFile(uploaded, "r") as z:
+    file_list = z.namelist()
+    pattern = "_unfolding_raw.csv"
+    csvs = sorted(f for f in file_list if f.endswith(pattern))
+    for csv_path in csvs:
+        rep = csv_path.split("(")[-1].split(")")[0]
+        if channel.startswith("350/330") and "Ratio" not in csv_path:
+            continue
+        if channel.startswith("350 nm") and ("350 nm" not in csv_path or "Ratio" in csv_path):
+            continue
+        if channel.startswith("330 nm") and ("330 nm" not in csv_path or "Ratio" in csv_path):
+            continue
+        raw_bytes = z.read(csv_path)
+        df_csv = pd.read_csv(io.BytesIO(raw_bytes), sep="\t")
+        df_csv.columns = [c.strip() for c in df_csv.columns]
+        T = df_csv['T[°C]'].values
+        F = df_csv[df_csv.columns[1]].values
+        if method.startswith("First derivative"):
+            Tm, smooth, deriv = calc_tm_derivative(T, F, window)
+            idx_peak = np.argmax(deriv[10:-10]) + 10
+            pre = deriv[10:10+20]
+            post = deriv[-30:-10]
+            baseline = np.concatenate([pre, post])
+            amp_deriv = deriv[idx_peak] - np.mean(baseline)
+            noise_deriv = np.std(baseline)
+            snr = amp_deriv / noise_deriv if noise_deriv != 0 else np.nan
+            ci_low, ci_high, se, r2 = np.nan, np.nan, np.nan, np.nan
+            cap_data[rep] = {'T': T, 'F': F, 'smooth': smooth, 'deriv': deriv}
+        else:
+            Tm, (ci_low, ci_high), se, snr, r2, popt, pcov = calc_tm_boltzmann(T, F)
+            cap_data[rep] = {'T': T, 'F': F, 'popt': popt}
+        results.append({
+            'Capillary': rep,
+            'Tₘ (°C)': Tm,
+            'CI Lower': ci_low,
+            'CI Upper': ci_high,
+            'SE (°C)': se,
+            'SNR': snr,
+            'R²': r2,
+            'Concentration': ''
+        })
+
+# Summary table with editable concentration
+st.header("Summary of Tₘ Results")
+fdf = pd.DataFrame(results)
+df_results = fdf.copy()
+df_results['Capillary'] = df_results['Capillary'].astype(int)
+df_results = df_results.sort_values('Capillary')
+edited = st.data_editor(
+    df_results,
+    key='editor',
+    num_rows='fixed',
+    use_container_width=True,
+    hide_index=True
+)
+st.info("Enter analyte concentration (M) in the 'Concentration' column for each capillary.")
+
+# EC50 calculation
+if st.button("Calculate EC₅₀"):
+    df_fit = edited.dropna(subset=['Concentration'])
+    x = df_fit['Concentration'].astype(float).values
+    y = df_fit['Tₘ (°C)'].values
+    errs = df_fit['SE (°C)'].astype(float).values
+    def hill4(x, bottom, top, ec50, slope):
+        return bottom + (top - bottom) * x**slope / (ec50**slope + x**slope)
+    p0 = [np.min(y), np.max(y), np.median(x), 1.0]
+    popt, pcov = curve_fit(hill4, x, y, p0=p0, maxfev=100000)
+    bottom_fit, top_fit, ec50, hs = popt
+    se_ec50 = np.sqrt(pcov[2,2])
+    dfree = len(x) - len(popt)
+    tval = t.ppf(0.975, dfree)
+    ci_ec50 = (ec50 - tval*se_ec50, ec50 + tval*se_ec50)
+    st.subheader("Dose–Response Fit Results")
+    st.write(f"EC₅₀: {ec50:.2e} M ")
+    st.write(f"95% CI: [{ci_ec50[0]:.2e}, {ci_ec50[1]:.2e}] M")
+    fig, ax = plt.subplots()
+    ax.errorbar(x, y, yerr=errs, fmt='o', label='Data ± SE')
+    xs = np.logspace(np.log10(min(x)/2), np.log10(max(x)*2), 200)
+    ax.semilogx(xs, hill4(xs, *popt), '-', label=f'Fit (EC₅₀={ec50:.2e} M)')
+    ax.set_xlabel('Concentration (M)')
+    ax.set_ylabel('Tₘ (°C)')
+    ax.legend()
+    st.pyplot(fig)
+
+# Detailed plots
+st.info("Click on a capillary below to view detailed plots.")
+for rep_str, data in cap_data.items():
+    rep_int = int(rep_str)
+    with st.expander(f"Capillary {rep_str}"):
+        T = data['T']
+        F = data['F']
+        if method.startswith("First derivative"):
+            smooth = data['smooth']
+            deriv = data['deriv']
+            fig1, ax1 = plt.subplots()
+            ax1.plot(T, F, label='Raw'); ax1.plot(T, smooth, label='Smoothed')
+            ax1.set_xlabel('Temperature (°C)'); ax1.set_ylabel('Signal'); ax1.legend()
+            st.pyplot(fig1)
+            T_trim = T[10:-10]
+            deriv_trim = deriv[10:-10]
+            fig2, ax2 = plt.subplots()
+            ax2.plot(T_trim, deriv_trim, label='dF/dT (trimmed)')
+            tm_val = edited.loc[edited['Capillary']==rep_int, 'Tₘ (°C)'].values
+            if tm_val.size > 0:
+                ax2.axvline(tm_val[0], color='red', linestyle='--')
+            ax2.set_xlabel('Temperature (°C)'); ax2.set_ylabel('Derivative'); ax2.legend()
+            st.pyplot(fig2)
+        else:
+            popt = data.get('popt')
+            fig, ax = plt.subplots()
+            ax.plot(T, F, '.', label='Raw')
+            if popt is not None:
+                ax.plot(T, boltzmann_exp(T, *popt), '-', label='Fit')
+                tm_val = edited.loc[edited['Capillary']==rep_int, 'Tₘ (°C)'].values
+                if tm_val.size > 0:
+                    ax.axvline(tm_val[0], color='red', linestyle='--')
+            ax.set_xlabel('Temperature (°C)'); ax.set_ylabel('Signal'); ax.legend()
+            st.pyplot(fig)
+
+st.success("Analysis complete.")

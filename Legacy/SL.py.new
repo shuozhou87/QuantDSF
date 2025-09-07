@@ -1,0 +1,581 @@
+﻿#!/usr/bin/env python3
+"""
+nanoDSF Tm Calculation & Screening Streamlit App (Updated SL-0422.py)
+"""
+import sys
+import os
+import re
+
+# Avoid naming conflict if script name matches module
+curdir = os.path.dirname(__file__)
+if curdir in sys.path:
+    sys.path.remove(curdir)
+
+import streamlit as st
+# Restore path
+sys.path.insert(0, curdir)
+
+import zipfile
+import io
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import savgol_filter
+from scipy.optimize import curve_fit
+from scipy.stats import t
+from scipy.special import expit
+
+# Global Boltzmann function for fitting and plotting
+def boltzmann_exp(T, A_N, alpha, D_N, A_D, beta, D_D, Tm, k):
+    """Two-state Boltzmann with first-order exponential decays for both states"""
+    # Add numerical stability by clipping temperature range
+    T_clip = np.clip(T, T.min(), T.max())
+    # Use more stable exponential calculation
+    F_N = A_N * np.exp(-alpha * T_clip) + D_N  # Native state: first-order exponential decay
+    F_D = A_D * np.exp(-beta * T_clip) + D_D   # Denatured state: first-order exponential decay
+    # Add numerical stability to the transition term
+    transition = 1 / (1 + np.exp((Tm - T_clip) / k))
+    return F_N + (F_D - F_N) * transition
+
+# Helper: first derivative method
+def calc_tm_derivative(T, F, window_length):
+    # Ensure polyorder is less than window_length (polyorder=3, window_length >= 5, so OK)
+
+    # Primary smoothing of F
+    smooth_F = savgol_filter(F, window_length=window_length, polyorder=3)
+    
+    # First derivative of smoothed_F
+    raw_derivative = np.gradient(smooth_F, T)
+    
+    # Secondary smoothing of the derivative
+    smooth_derivative = savgol_filter(raw_derivative, window_length=window_length, polyorder=3)
+
+    # Find peak in the smoothed_derivative
+    peak_idx = np.nan
+    tm_value = np.nan
+
+    # Determine a valid search range for the peak, avoiding edges.
+    edge_buffer = max(10, window_length // 2 + 1)
+
+    if len(smooth_derivative) >= 2 * edge_buffer: # Ensure there's a search zone
+        search_zone = smooth_derivative[edge_buffer : -edge_buffer]
+        if search_zone.size > 0:
+            idx_in_zone = np.argmax(search_zone)
+            peak_idx = idx_in_zone + edge_buffer
+    elif len(smooth_derivative) > 0: # Fallback if data is too short for buffered search
+        # This case handles data where len(smooth_derivative) < 2 * edge_buffer but > 0
+        peak_idx = np.argmax(smooth_derivative)
+    
+    if not np.isnan(peak_idx) and 0 <= peak_idx < len(T):
+        tm_value = T[int(peak_idx)]
+    else:
+        peak_idx = np.nan # Ensure peak_idx is NaN if no valid peak found
+
+    return tm_value, smooth_F, smooth_derivative, peak_idx
+
+# Helper: two-state Boltzmann regression
+def calc_tm_boltzmann(T, F):
+    """Fit 2â€‘state Boltzmann; compute stateâ€‘SNR and log10(Î”AIC)"""
+    # First step: fit one-state model to get better initial guesses
+    def one_state(T, A, alpha, D):
+        return A * np.exp(-alpha * T) + D
+    
+    # è®¡ç®—æ•°æ®ç‰¹å¾
+    F_range = F.max() - F.min()
+    F_center = (F.max() + F.min()) / 2
+    T_range = T.max() - T.min()
+    T_center = (T.max() + T.min()) / 2
+    
+    # æ”¹è¿›çš„åˆå§‹å‚æ•°è®¾ç½®
+    p0 = [
+        F.max(),          # A_N: åˆå§‹è§å…‰å¼ºåº¦
+        0.005,            # alpha: è¾ƒå°çš„åˆå§‹è¡°å‡çŽ‡
+        F.min(),          # D_N: åˆå§‹åŸºçº¿
+        F.max() * 0.8,    # A_D: å˜æ€§æ€åˆå§‹è§å…‰å¼ºåº¦ï¼ˆç•¥ä½ŽäºŽA_Nï¼‰
+        0.005,            # beta: è¾ƒå°çš„åˆå§‹è¡°å‡çŽ‡
+        F.min() * 1.2,    # D_D: å˜æ€§æ€åˆå§‹åŸºçº¿ï¼ˆç•¥é«˜äºŽD_Nï¼‰
+        T_center,         # Tm: åˆå§‹ç†”ç‚¹æ¸©åº¦ï¼ˆæ¸©åº¦èŒƒå›´ä¸­ç‚¹ï¼‰
+        0.3               # k: è¾ƒå°çš„åˆå§‹æ–œçŽ‡å‚æ•°
+    ]
+    
+    # é¦–å…ˆæ‹Ÿåˆå•æ€æ¨¡åž‹
+    try:
+        popt1, pcov1 = curve_fit(one_state, T, F, p0=[F.max(), 0.005, F.min()], maxfev=200000)
+        y1 = one_state(T, *popt1)
+        rss1 = np.sum((F - y1)**2)
+    except:
+        rss1 = np.sum((F - F.mean())**2)  # å¦‚æžœæ‹Ÿåˆå¤±è´¥ï¼Œä½¿ç”¨å‡å€¼ä½œä¸ºåŸºå‡†
+    
+    # å°è¯•å¤šæ¬¡æ‹Ÿåˆï¼Œä½¿ç”¨ä¸åŒçš„åˆå§‹å‚æ•°
+    best_rss = float('inf')
+    best_popt = None
+    best_pcov = None
+    
+    # ç”Ÿæˆå¤šç»„åˆå§‹å‚æ•°
+    initial_params = [
+        p0,  # åŽŸå§‹å‚æ•°
+        [F.max(), 0.01, F.min(), F.max()*0.9, 0.01, F.min()*1.1, T_center, 0.4],  # å‚æ•°ç»„1
+        [F.max(), 0.003, F.min(), F.max()*0.7, 0.003, F.min()*1.3, T_center, 0.2],  # å‚æ•°ç»„2
+    ]
+    
+    for p0_try in initial_params:
+        try:
+            popt2, pcov2 = curve_fit(boltzmann_exp, T, F, p0=p0_try, maxfev=200000)
+            y2 = boltzmann_exp(T, *popt2)
+            rss2 = np.sum((F - y2)**2)
+            
+            if rss2 < best_rss:
+                best_rss = rss2
+                best_popt = popt2
+                best_pcov = pcov2
+        except:
+            continue
+    
+    if best_popt is None:
+        st.warning(f"TSB fitting failed for all attempts")
+        st.warning(f"Data range: T[{T.min():.1f} to {T.max():.1f}], F[{F.min():.3f} to {F.max():.3f}]")
+        return np.nan, (np.nan, np.nan), np.nan, np.nan, np.nan, np.nan, None, None
+    
+    # ä½¿ç”¨æœ€ä½³æ‹Ÿåˆç»“æžœ
+    popt2 = best_popt
+    pcov2 = best_pcov
+    
+    # parameters & CI
+    Tm = popt2[6]
+    se = np.sqrt(np.diag(pcov2))[6]
+    dfree = len(T) - len(popt2)
+    tval = t.ppf(0.975, dfree)
+    ci = (Tm - tval*se, Tm + tval*se)
+    
+    # residuals 2â€‘state
+    y2 = boltzmann_exp(T, *popt2)
+    resid2 = F - y2
+    rss2 = np.sum(resid2**2)
+    sigma_resid = np.sqrt(rss2/dfree)
+    
+    # stateâ€‘SNR
+    A_N, alpha, D_N, A_D, beta, D_D = popt2[:6]
+    FN = A_N*np.exp(-alpha*Tm)+D_N
+    FD = A_D*np.exp(-beta*Tm)+D_D
+    deltaF = abs(FD-FN)
+    snr_state = deltaF/sigma_resid if sigma_resid else np.nan
+    
+    # RÂ²
+    ss_tot = np.sum((F-F.mean())**2)
+    r2 = 1 - rss2/ss_tot if ss_tot else np.nan
+    
+    # Calculate AIC for comparison
+    n = len(T)
+    aic1 = n*np.log(rss1/n) + 2*3
+    aic2 = n*np.log(rss2/n) + 2*8
+    delta_aic = aic1 - aic2
+    log_delta_aic = np.log10(delta_aic) if delta_aic > 0 else 0.0
+    
+    return Tm, ci, se, snr_state, r2, log_delta_aic, popt2, pcov2
+
+def parse_concentration(filename):
+    """Extract concentration from filename in scientific notation format."""
+    # Look for pattern like "1.00E-4" or "5E-5" in filename
+    match = re.search(r'(\d+(?:\.\d+)?E[+-]\d+)', filename)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+def global_combined(T_all, F_all, C_all, base_mean):
+    # base_mean: [A_N, alpha, D_N, A_D, beta, D_D, k]
+    A_N0, alpha0, D_N0, A_D0, beta0, D_D0, k0 = base_mean
+    # åˆå§‹å‚æ•°: 6ä¸ªBoltzmannå‚æ•°+1ä¸ªk+4PLçš„4ä¸ªå‚æ•°
+    p0 = [A_N0, alpha0, D_N0, A_D0, beta0, D_D0, k0,
+          65.0, 25.0, np.median(C_all), 1.0]
+    lb = [0,0,-np.inf,0,0,-np.inf,1e-6,0,0,1e-12,0.1]
+    ub = [np.inf]*11
+    # ä¿®æ­£ï¼šclipåˆå§‹å‚æ•°åˆ°è¾¹ç•ŒèŒƒå›´
+    p0 = np.maximum(p0, lb)
+    p0 = np.minimum(p0, ub)
+    def residuals(par):
+        A_N, alpha, D_N, A_D, beta, D_D, k, Tm0, dTm, Kd, n = par
+        F_N = A_N*np.exp(-alpha*T_all)+D_N
+        F_D = A_D*np.exp(-beta*T_all)+D_D
+        Tm_vals = Tm0 + dTm*(C_all**n)/(Kd**n + C_all**n)
+        return F_N + (F_D - F_N)*expit((T_all - Tm_vals)/k) - F_all
+    from scipy.optimize import least_squares
+    res = least_squares(residuals, p0, bounds=(lb,ub),
+                        ftol=1e-8, xtol=1e-8, gtol=1e-8,
+                        x_scale='jac', max_nfev=300000)
+    return res
+
+# Cache the data processing to avoid reprocessing on every interaction
+@st.cache_data
+def process_zip_data(uploaded_file, channel, method, sg_window_setting):
+    results = []
+    cap_data = {}
+    
+    with zipfile.ZipFile(uploaded_file, "r") as z:
+        all_files = z.namelist()
+        csvs = sorted([f for f in all_files if f.lower().endswith("raw.csv")])
+        if not csvs:
+            return None, None
+            
+        for csv_path in csvs:
+            rep = os.path.splitext(os.path.basename(csv_path))[0]
+            conc = parse_concentration(csv_path)
+            
+            # channel filter
+            if channel.startswith("350/330") and 'ratio' not in csv_path.lower(): continue
+            if channel == '350 nm' and '350 nm' not in csv_path.lower(): continue
+            if channel == '330 nm' and '330 nm' not in csv_path.lower(): continue
+            
+            raw = z.read(csv_path)
+            df = pd.read_csv(io.BytesIO(raw), sep='\t')
+            df.columns = [c.strip() for c in df.columns]
+            T = df['T[Â°C]'].values
+            F = df[df.columns[1]].values
+            
+            # æ•°æ®éªŒè¯
+            if len(T) != len(F) or len(T) < 10:
+                st.warning(f"Invalid data length in {csv_path}")
+                continue
+            
+            if method.startswith("First derivative"):
+                Tm, smooth, deriv, tm_idx = calc_tm_derivative(T, F, window_length=sg_window_setting)
+                
+                if not np.isnan(tm_idx):
+                    idx_for_snr = int(tm_idx)
+                    # SNR Baseline Calculation - robust slicing
+                    len_deriv = len(deriv)
+                    base_values = []
+                    if len_deriv > 60: # Ensure enough points for fixed slices
+                        # Avoid overlap with peak: check if tm_idx is far from these regions
+                        # Simple check: if peak is not in the first/last 35 points (approx)
+                        if idx_for_snr > 35:
+                             base_values.extend(deriv[10:30])
+                        if idx_for_snr < len_deriv - 35:
+                             base_values.extend(deriv[len_deriv-30:len_deriv-10])
+                    
+                    if not base_values and len_deriv > 20: # Fallback for shorter data or if above failed
+                        segment_len = max(5, len_deriv // 4)
+                        if idx_for_snr > segment_len + 2: # Ensure peak is not in the first segment
+                            base_values.extend(deriv[:segment_len])
+                        if idx_for_snr < len_deriv - (segment_len + 2): # Ensure peak is not in the last segment
+                            base_values.extend(deriv[-segment_len:])
+
+                    base_array = np.array(base_values)
+                    if base_array.size > 1 and base_array.std() != 0:
+                        snr = (deriv[idx_for_snr] - base_array.mean()) / base_array.std()
+                    else:
+                        snr = np.nan # Not enough points for baseline or std is zero
+                else: # tm_idx is np.nan, so Tm was not found
+                    snr = np.nan
+
+                ci_low = ci_high = se = r2 = log_dAIC = np.nan # These are not calculated by FD method
+                cap_data[rep] = {'T':T,'F':F,'smooth':smooth,'deriv':deriv}
+            else:
+                Tm, (ci_low,ci_high), se, snr, r2, log_dAIC, popt, pcov = calc_tm_boltzmann(T, F)
+                cap_data[rep] = {'T':T,'F':F,'popt':popt}
+                
+            flag = "âš ï¸" if (not np.isnan(snr) and snr < 2) or (not np.isnan(log_dAIC) and log_dAIC < 1) else ""
+            results.append({
+                'Capillary': rep,
+                'Tâ‚˜ (Â°C)': Tm,
+                'CI Lower': ci_low,
+                'CI Upper': ci_high,
+                'SE (Â°C)': se,
+                'State SNR': snr,
+                'RÂ²': r2,
+                'log Î”AIC': log_dAIC,
+                'Flag': flag,
+                'Sample Info': '',
+                'Concentration': conc  # Store as float or None, not formatted string
+            })
+    
+    return pd.DataFrame(results), cap_data
+
+# Page configuration
+st.set_page_config(page_title="nanoDSF Tâ‚˜ Calculator & Screening", layout="wide")
+st.title("nanoDSF Tâ‚˜ Calculation & Screening App")
+
+# Sidebar settings
+st.sidebar.header("Analysis Settings")
+method = st.sidebar.selectbox(
+    "Select Tâ‚˜ calculation method:",
+    ["Two-state Boltzmann (default)", "First derivative"]
+)
+channel = st.sidebar.selectbox(
+    "Select data channel:",
+    ["350/330 nm ratio (default)", "350 nm", "330 nm"]
+)
+
+user_sg_window = 21 # Default value for SG window
+if method.startswith("First derivative"):
+    user_sg_window = st.sidebar.number_input(
+        "Savitzkyâ€“Golay window length:",
+        min_value=5,
+        max_value=101, # Max value can be adjusted based on typical data length
+        step=2,
+        value=21, # Default to 21, must be odd
+        key='sg_window_input' # Added a key for stability
+    )
+
+# Upload data ZIP
+uploaded = st.file_uploader("Upload nanoDSF ZIP archive", type="zip")
+if not uploaded:
+    st.info("Please upload a ZIP file containing raw CSV files.")
+    st.stop()
+
+# Initialize session state for current dataset
+if 'current_dataset' not in st.session_state:
+    st.session_state.current_dataset = None
+    st.session_state.checkbox_states = {}
+    st.session_state.edited_concentrations = {} # Initialize concentration store
+
+# Check if new dataset is loaded
+if uploaded.name != st.session_state.current_dataset:
+    st.session_state.current_dataset = uploaded.name
+    st.session_state.checkbox_states = {}
+    st.session_state.edited_concentrations = {} # Reset for new dataset
+
+# Process data using cached function
+_df, cap_data = process_zip_data(uploaded, channel, method, user_sg_window)
+if _df is None:
+    st.error("No raw CSV files found in the ZIP archive.")
+    st.stop()
+
+# Apply manually edited concentrations if they exist in session state
+if 'edited_concentrations' in st.session_state and st.session_state.edited_concentrations:
+    for index, row in _df.iterrows():
+        capillary_id = row['Capillary']
+        if capillary_id in st.session_state.edited_concentrations:
+            _df.loc[index, 'Concentration'] = st.session_state.edited_concentrations[capillary_id]
+
+# Initialize checkbox states for all capillaries before filtering
+if 'checkbox_states' not in st.session_state:
+    st.session_state.checkbox_states = {}
+
+# Initialize checkbox states for new capillaries
+for _, row in _df.iterrows():
+    if row['Capillary'] not in st.session_state.checkbox_states:
+        st.session_state.checkbox_states[row['Capillary']] = True
+
+# Summary table
+st.header("Summary of Tâ‚˜ Results")
+
+# Add checkbox column using preserved states
+_df['Include in EC50'] = _df['Capillary'].map(st.session_state.checkbox_states)
+
+# no integer cast, leave Capillary as string
+try:
+    _df = _df.sort_values('Capillary')
+except:
+    pass
+
+df_res = _df.reset_index(drop=True)
+
+# Prepare a display version of df_res for st.data_editor
+# Convert 'Concentration' to string for TextColumn compatibility, handling NaNs
+df_display = df_res.copy()
+if 'Concentration' in df_display.columns:
+    df_display['Concentration'] = df_display['Concentration'].apply(lambda x: f"{x:.2e}" if pd.notnull(x) else "")
+
+# Use a unique key for the data editor to prevent unnecessary reruns
+editor_key = f"editor_{uploaded.name}_{channel}_{method}"
+
+# KNOWN ISSUE: Concentration column sorting in the UI.
+# To allow flexible input of scientific notation (e.g., "1e-7") and decimals for the 'Concentration' column,
+# it is configured as a TextColumn and the underlying DataFrame data passed to st.data_editor
+# has this column converted to strings. As a result, when the user clicks on the 'Concentration' 
+# column header in the displayed table to sort, it performs a lexicographical (string) sort 
+# rather than a numerical sort. 
+# Numerical sorting is correctly handled for calculations (e.g., EC50 fitting) as the string 
+# inputs are converted back to floats in the backend. This is a trade-off for input flexibility.
+# Future improvement could explore custom components or alternative ways to achieve both 
+# flexible input and direct numerical sorting in the UI table.
+
+edited = st.data_editor(
+    df_display, # Use the string-converted version for display/edit
+    key=editor_key,
+    hide_index=True,
+    use_container_width=True,
+    column_config={
+        "Include in EC50": st.column_config.CheckboxColumn(
+            "Include in EC50",
+            help="Select capillaries to include in EC50 fitting",
+            default=True,
+        ),
+        "Concentration": st.column_config.TextColumn(
+            "Concentration (M)",
+            help="Enter concentration (e.g., 0.1, 1e-6, 1.23E-7). Parsed from filename or manually entered.",
+        )
+    }
+)
+
+# Update session state with new checkbox values and concentrations
+for index, row in edited.iterrows(): # Iterate over the DataFrame returned by data_editor
+    capillary_id = row['Capillary'] # Assuming Capillary is the unique ID and still present
+    st.session_state.checkbox_states[capillary_id] = row['Include in EC50']
+
+    if 'Concentration' in row:
+        concentration_input_str = str(row['Concentration']) # Input is now definitely a string from TextColumn
+
+        if concentration_input_str.strip() == "": # Handle empty string input as None
+            st.session_state.edited_concentrations[capillary_id] = None
+        else:
+            try:
+                parsed_float = float(concentration_input_str)
+                st.session_state.edited_concentrations[capillary_id] = parsed_float
+            except ValueError:
+                st.warning(f"Invalid concentration for {capillary_id}: '{concentration_input_str}'. Use numbers or scientific notation (e.g., 1e-7). Previous valid value kept or set to None.")
+                if capillary_id not in st.session_state.edited_concentrations:
+                    st.session_state.edited_concentrations[capillary_id] = None
+
+# For EC50 fitting and other calculations, we need the original df_res or edited data 
+# with concentrations as floats. We should re-apply the (parsed) session state concentrations 
+# to the original numerical df_res or a copy of it before calculations.
+
+st.info("Fill 'Sample Info' and 'Concentration', then run ECâ‚…â‚€ or Î”Tâ‚˜.")
+
+# EC50 fitting
+if st.button("Calculate ECâ‚…â‚€"):
+    # Create a DataFrame for fitting, ensuring 'Concentration' is float
+    df_for_fitting = df_res.copy() # Start with the original numerical data structure
+    # Update with any edited concentrations from session state
+    for idx, cap_row in df_for_fitting.iterrows():
+        cap_id = cap_row['Capillary']
+        if cap_id in st.session_state.edited_concentrations:
+            df_for_fitting.loc[idx, 'Concentration'] = st.session_state.edited_concentrations[cap_id]
+    
+    # Filter for selected capillaries and non-empty concentrations
+    df_fit = df_for_fitting[df_for_fitting['Include in EC50']].copy()
+    # Convert concentration to float and drop rows where it's NaN after conversion or originally
+    df_fit['Concentration'] = pd.to_numeric(df_fit['Concentration'], errors='coerce')
+    df_fit.dropna(subset=['Concentration'], inplace=True)
+
+    if len(df_fit) < 3:
+        st.error("Need at least 3 selected capillaries with concentration values for EC50 fitting.")
+        st.stop()
+        
+    x = df_fit['Concentration'].astype(float).values
+    y = df_fit['Tâ‚˜ (Â°C)'].values
+    errs = df_fit['SE (Â°C)'].astype(float).values
+    def hill4(x,b,t,ec,n): return b + (t-b)*x**n/(ec**n+x**n)
+    p0 = [y.min(), y.max(), np.median(x), 1.0]
+    popt, pcov = curve_fit(hill4, x, y, p0=p0, maxfev=100000)
+    ec50 = popt[2]; se_ec = np.sqrt(pcov[2,2])
+    dfree = len(x)-len(popt); tval = t.ppf(0.975, dfree)
+    ci = (ec50-tval*se_ec, ec50+tval*se_ec)
+    st.subheader("Doseâ€“Response Fit Results (Two-stage 4PL)")
+    st.write(f"ECâ‚…â‚€ = {ec50:.2e} M (95% CI: {ci[0]:.2e}â€“{ci[1]:.2e})")
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.errorbar(x, y, yerr=errs, fmt='o', label='Data Â± SE')
+    xs = np.logspace(np.log10(x.min()/2), np.log10(x.max()*2), 200)
+    ax.semilogx(xs, hill4(xs,*popt), '-', label=f'Fit ECâ‚…â‚€={ec50:.2e} M')
+    ax.set_xlabel('Concentration (M)'); ax.set_ylabel('Tâ‚˜ (Â°C)'); ax.legend()
+    st.pyplot(fig)
+    plt.close(fig)
+
+    # ========== å…¨å±€è”åˆæ‹Ÿåˆéƒ¨åˆ† ==========
+    # 1. æ”¶é›†æ‰€æœ‰é€‰ä¸­æ¯›ç»†ç®¡çš„åŽŸå§‹Tã€Fã€C
+    T_all, F_all, C_all = [], [], []
+    base_params = []
+    for idx, row in df_fit.iterrows():
+        cap = row['Capillary']
+        conc = row['Concentration']
+        # ä»Žcap_dataä¸­èŽ·å–åŽŸå§‹Tã€F
+        if cap in cap_data:
+            T = cap_data[cap]['T']
+            F = cap_data[cap]['F']
+            T_all.append(T)
+            F_all.append(F)
+            C_all.append(np.full_like(T, conc, dtype=float))
+            # å•ç®¡æ‹Ÿåˆå‚æ•°ï¼ˆç”¨äºŽå…¨å±€åˆå§‹å€¼ï¼‰
+            popt = cap_data[cap].get('popt')
+            if popt is not None:
+                base_params.append(popt[[0,1,2,3,4,5,7]]) # å–A_N,alpha,D_N,A_D,beta,D_D,k
+    if len(T_all) < 3:
+        st.warning("å…¨å±€æ‹Ÿåˆéœ€è¦è‡³å°‘3æ¡åŽŸå§‹æ›²çº¿ã€‚")
+    else:
+        T_all = np.concatenate(T_all)
+        F_all = np.concatenate(F_all)
+        C_all = np.concatenate(C_all)
+        base_mean = np.mean(np.array(base_params), axis=0)
+        res = global_combined(T_all, F_all, C_all, base_mean)
+        pg = res.x
+        Jg = res.jac
+        dof = len(F_all) - len(pg)
+        sigma2 = np.sum(res.fun**2)/dof
+        covg = np.linalg.pinv(Jg.T@Jg)*sigma2
+        se_g = np.sqrt(np.diag(covg))
+        Kd_g, se_gk = pg[9], se_g[9]
+        st.subheader("Doseâ€“Response Fit Results (Global Combined 4PL)")
+        st.write(f"ECâ‚…â‚€ = {Kd_g:.2e} M (SE: {se_gk:.2e})")
+        # è®¡ç®—å…¨å±€Tmé¢„æµ‹
+        Tm0, dTm, n, Kd = pg[7], pg[8], pg[10], pg[9]
+        df_fit['Tm (Global)'] = Tm0 + dTm*(df_fit['Concentration']**n)/(Kd**n + df_fit['Concentration']**n)
+        # æ›´æ–°Summaryè¡¨æ ¼
+        df_res.set_index('Capillary', inplace=True)
+        for idx, row in df_fit.iterrows():
+            df_res.at[row['Capillary'], 'Tm (Global)'] = row['Tm (Global)']
+        df_res.reset_index(inplace=True)
+        # å±•ç¤ºå…¨å±€Tm
+        st.dataframe(df_fit[['Capillary','Concentration','Tâ‚˜ (Â°C)','Tm (Global)']], use_container_width=True)
+
+# Single-dose Î”Tâ‚˜ screening
+st.header("Single-Dose Î”Tâ‚˜ Screening")
+cap_options = df_res['Capillary'].tolist()
+control = st.selectbox("Select control capillary", cap_options)
+tests = st.multiselect("Select test capillaries", [c for c in cap_options if c!=control])
+if st.button("Calculate Î”Tâ‚˜"):
+    t0 = df_res.loc[df_res['Capillary']==control,'Tâ‚˜ (Â°C)'].values[0]
+    s0 = df_res.loc[df_res['Capillary']==control,'SE (Â°C)'].values[0]
+    rows=[]
+    for c in tests:
+        tm = df_res.loc[df_res['Capillary']==c,'Tâ‚˜ (Â°C)'].values[0]
+        se = df_res.loc[df_res['Capillary']==c,'SE (Â°C)'].values[0]
+        d = tm - t0; se_d=np.sqrt(se**2+s0**2)
+        info = edited.loc[edited['Capillary']==c,'Sample Info'].values[0] if 'Sample Info' in edited.columns else ''
+        rows.append({'Capillary':c,'Sample Info':info,'Î”Tâ‚˜ (Â°C)':d,'SE Î”Tâ‚˜':se_d})
+    df_delta = pd.DataFrame(rows).sort_values('Î”Tâ‚˜ (Â°C)',ascending=False)
+    st.dataframe(df_delta,use_container_width=True)
+    fig, ax = plt.subplots()
+    ax.bar(df_delta['Sample Info'], df_delta['Î”Tâ‚˜ (Â°C)'], yerr=df_delta['SE Î”Tâ‚˜'])
+    ax.set_ylabel('Î”Tâ‚˜ (Â°C)')
+    ax.set_xticklabels(df_delta['Sample Info'], rotation=45, ha='right')
+    st.pyplot(fig)
+
+# Detailed per-capillary plots
+st.info("Click on a capillary to view detailed curves.")
+for rep, data in cap_data.items():
+    with st.expander(f"Capillary {rep}"):
+        T = data['T']; F = data['F']
+        if method.startswith('First derivative'):
+            smooth = data['smooth']; deriv = data['deriv']
+            fig1, ax1 = plt.subplots(figsize=(8, 4))
+            ax1.plot(T,F,label='Raw'); ax1.plot(T,smooth,label='Smoothed')
+            ax1.set_xlabel('T (Â°C)'); ax1.set_ylabel('Fluorescence'); ax1.legend()
+            st.pyplot(fig1)
+            plt.close(fig1)
+            
+            fig2, ax2 = plt.subplots(figsize=(8, 4))
+            ax2.plot(T[10:-10],deriv[10:-10],label='dF/dT')
+            tm_val = df_res.loc[df_res['Capillary']==rep,'Tâ‚˜ (Â°C)'].values
+            if tm_val.size: ax2.axvline(tm_val[0],color='red',linestyle='--')
+            ax2.set_xlabel('T (Â°C)'); ax2.set_ylabel('dF/dT'); ax2.legend()
+            st.pyplot(fig2)
+            plt.close(fig2)
+        else:
+            popt = data.get('popt')
+            fig3, ax3 = plt.subplots(figsize=(8, 4))
+            ax3.plot(T,F,'.',label='Raw')
+            if popt is not None:
+                ax3.plot(T,boltzmann_exp(T,*popt),'-',label='Fit')
+                tm_val = df_res.loc[df_res['Capillary']==rep,'Tâ‚˜ (Â°C)'].values
+                if tm_val.size: ax3.axvline(tm_val[0],color='red',linestyle='--')
+            ax3.set_xlabel('T (Â°C)'); ax3.set_ylabel('Fluorescence'); ax3.legend()
+            st.pyplot(fig3)
+            plt.close(fig3)
+
+st.success("Analysis complete.")
+
+

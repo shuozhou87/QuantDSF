@@ -1,0 +1,97 @@
+import zipfile
+import pandas as pd
+import numpy as np
+from io import BytesIO
+from scipy.optimize import curve_fit, least_squares
+from scipy.special import expit
+
+# ---------------------- CONFIG ----------------------
+ZIP_PATH = "TNFA-ZN-DOSE.zip"   # same directory
+CONC_MAP = {
+    1: 5e-5, 2: 3.91e-7, 3: 1.95e-7, 4: 2.5e-5,
+    5: 1.25e-5, 6: 7.81e-7, 7: 1e-4, 8: 9.77e-8,
+    9: 6.25e-6, 10: 1.56e-6, 11: 3.13e-6, 12: 4.88e-8
+}
+# ----------------------------------------------------
+
+def boltzmann(T, A_N, alpha, D_N, A_D, beta, D_D, Tm, k):
+    F_N = A_N * np.exp(-alpha * T) + D_N
+    F_D = A_D * np.exp(-beta * T) + D_D
+    return F_N + (F_D - F_N) / (1 + np.exp((Tm - T) / k))
+
+def load_data(zip_path):
+    T_list, F_list, C_list, files = [], [], [], []
+    with zipfile.ZipFile(zip_path) as z:
+        for fname in sorted(f for f in z.namelist() if '_350 nm_unfolding_raw.csv' in f)[:12]:
+            cap = int(fname.split('(')[-1].split(')')[0])
+            df = pd.read_csv(BytesIO(z.read(fname)), sep='\t')
+            T, F = df['T[°C]'].values, df.iloc[:,1].values
+            T_list.append(T); F_list.append(F); C_list.append(np.full_like(T, CONC_MAP[cap]))
+            files.append((cap, T, F))
+    return np.concatenate(T_list), np.concatenate(F_list), np.concatenate(C_list), files
+
+def fit_individual(files):
+    indiv = []; baseline = []
+    for cap, T, F in files:
+        p0 = [np.ptp(F), 0.01, F.min(), np.ptp(F), 0.005, F.min(), np.median(T), 2.0]
+        popt, pcov = curve_fit(boltzmann, T, F, p0=p0, maxfev=30000)
+        indiv.append({'cap': cap, 'conc': CONC_MAP[cap], 'Tm': popt[6], 'Tm_SE': np.sqrt(np.diag(pcov))[6]})
+        baseline.append(popt[[0,1,2,3,4,5,7]])
+    return pd.DataFrame(indiv).sort_values('cap'), np.mean(np.array(baseline), axis=0)
+
+def dose_4pl(C, Tm0, dTm, Kd, n):
+    return Tm0 + dTm * (C**n) / (Kd**n + C**n)
+
+def twostage_4pl(indiv_df):
+    p0 = [indiv_df['Tm'].min(), indiv_df['Tm'].max()-indiv_df['Tm'].min(),
+          np.median(indiv_df['conc']), 1.0]
+    bounds = ([0,0,1e-9,0.1],[150,150,1e-2,5.0])
+    popt, pcov = curve_fit(dose_4pl, indiv_df['conc'], indiv_df['Tm'],
+                           p0=p0, bounds=bounds, maxfev=20000)
+    return popt, pcov
+
+def global_combined(T_all, F_all, C_all, base_mean):
+    A_N0, alpha0, D_N0, A_D0, beta0, D_D0, k0 = base_mean
+    p0 = [A_N0, alpha0, D_N0, A_D0, beta0, D_D0, k0,
+          65.0, 25.0, np.median(C_all), 1.0]
+    lb = [0,0,-np.inf,0,0,-np.inf,1e-6,0,0,1e-12,0.1]
+    ub = [np.inf]*11
+    def residuals(par):
+        A_N, alpha, D_N, A_D, beta, D_D, k, Tm0, dTm, Kd, n = par
+        F_N = A_N*np.exp(-alpha*T_all)+D_N
+        F_D = A_D*np.exp(-beta*T_all)+D_D
+        Tm_vals = Tm0 + dTm*(C_all**n)/(Kd**n + C_all**n)
+        return F_N + (F_D - F_N)*expit((T_all - Tm_vals)/k) - F_all
+    res = least_squares(residuals, p0, bounds=(lb,ub),
+                        ftol=1e-8, xtol=1e-8, gtol=1e-8,
+                        x_scale='jac', max_nfev=300000)
+    return res
+
+def main():
+    T_all, F_all, C_all, files = load_data(ZIP_PATH)
+    indiv_df, base_mean = fit_individual(files)
+
+    # Two-stage 4PL
+    p_ts, pcov_ts = twostage_4pl(indiv_df)
+    Kd_ts, se_ts = p_ts[2], np.sqrt(np.diag(pcov_ts))[2]
+    print("\nTwo-stage 4PL  Kd = %.3e  SE = %.3e" % (Kd_ts, se_ts))
+
+    # Global combined fit
+    res = global_combined(T_all, F_all, C_all, base_mean)
+    pg = res.x
+    Jg = res.jac
+    dof = len(F_all) - len(pg)
+    sigma2 = np.sum(res.fun**2)/dof
+    covg = np.linalg.pinv(Jg.T@Jg)*sigma2
+    se_g = np.sqrt(np.diag(covg))
+    Kd_g, se_gk = pg[9], se_g[9]
+    print("Global combined 4PL  Kd = %.3e  SE = %.3e" % (Kd_g, se_gk))
+
+    # Per-concentration Tm comparison
+    Tm0, dTm, n, Kd = pg[7], pg[8], pg[10], pg[9]
+    indiv_df['Tm_pred_global'] = Tm0 + dTm*(indiv_df['conc']**n)/(Kd**n + indiv_df['conc']**n)
+    print("\nPer-concentration Tm (indiv vs global pred):")
+    print(indiv_df[['conc','Tm','Tm_pred_global']])
+
+if __name__ == "__main__":
+    main()

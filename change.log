@@ -1,0 +1,370 @@
+# Change Log - nanoDSF Analysis Application
+
+## [2024-05-29] - Advanced Gaussian Deconvolution with Baseline Correction
+
+### Added
+- **Gaussian Deconvolution with Linear Baseline Correction**:
+    - Modified `analysis/calc/tm_calc.py` to incorporate a global linear baseline (slope and intercept) into the `multi_gaussian` fitting model.
+    - Updated `deconvolute_peaks` function in `analysis/calc/tm_calc.py` to:
+        - Provide initial guesses for the new baseline parameters (slope, intercept).
+        - Set appropriate fitting boundaries for these baseline parameters.
+        - Adjust `scipy.optimize.curve_fit` calls and parameter handling to accommodate the increased number of parameters (N_peaks * 3 + 2).
+    - Ensured that `calc_tm_derivative` in `analysis/calc/tm_calc.py` uses the complete set of fitted parameters (including baseline) when generating the `fitted_curve` for plot visualization. This allows the plotted Gaussian fit to accurately reflect data with non-zero or sloped baselines.
+
+### Changed
+- **Optimized Deconvolution Plotting in Derivative View**:
+    - Updated `plot_tm_curve` in `visualization/plots.py` to prevent redundant plotting.
+    - If the composite Gaussian fit (with baseline correction, typically shown as a purple dashed line) is successfully plotted, the simpler, individual Gaussian component curves (which previously might appear as a red solid line for single peaks, assuming zero baseline) are no longer drawn. This provides a cleaner and more accurate visual representation of the deconvolution result.
+
+### Fixed
+- Addressed issues where Gaussian fit appeared "fat" or did not accurately represent the experimental peak shape due to the assumption of a zero baseline, especially for dF/dT curves with inherent negative or sloped baselines.
+
+## [2024-05-28] - Added Gaussian Deconvolution for Overlapping Transitions
+
+### Added
+- Gaussian peak deconvolution for automatic detection of overlapping transitions
+- Multi-Gaussian curve fitting to the derivative data
+- Visualization of individual Gaussian components on the derivative plot
+- Area calculation for each deconvolved peak
+- Automatic weighting based on peak area for more accurate Tm determination
+- Read-only peak information table for deconvolved peaks
+
+### Changed
+- Enhanced visualization with different markers for deconvolved peaks
+- Modified window length recommendations for deconvolution (25-31 recommended)
+- Improved peak detection to work better with overlapping transitions
+- Updated UI to provide guidance on when to use deconvolution
+
+### Fixed
+- Detection of shoulder peaks around 57°C without requiring manual parameter tuning
+- Difficulty in identifying overlapping transitions with similar heights
+- Inconsistent detection of transitions with varying window sizes
+
+## [2024-05-27] - Improved Shoulder Peak Detection and Curve Smoothing
+
+### Added
+- Cubic interpolation option for smoother curves and better peak detection
+- Enhanced shoulder peak detection with more sensitive parameters
+- Automatic selection of peaks in the 55-60°C range (typical shoulder region)
+- Visual markers for peak positions on the derivative plot
+- Improved grid and axis formatting for better visualization
+
+### Changed
+- Reduced peak detection thresholds for height (0.05) and prominence (0.05)
+- Decreased minimum width requirement for peaks from 2.0 to 1.5
+- Lowered SNR threshold for peaks from 1.5 to 1.0
+- Reduced minimum peak distance from 5 to 3 points
+- Enhanced plot styling with grid lines and better markers
+
+### Fixed
+- Missing shoulder peaks around 57°C in complex unfolding patterns
+- Rough appearance of derivative curves
+- Difficulty in visually identifying exact peak positions
+
+## [2024-05-26] - Major Update to Multi-Peak Detection and Data Processing
+
+### Added
+- Adaptive smoothing algorithm that compares noise levels before/after smoothing
+- Dedicated shoulder peak detection for identifying closely spaced transitions
+- Temperature-based peak classification (Low Tm vs High Tm)
+- Helpful UI tips for window size selection in multi-peak detection
+- Support for up to 3 additional peaks for complex unfolding patterns
+- Type-specific labeling of transitions (peak vs dip) in detail views
+- Documentation in README.md about data organization (DOSE/ and SP/ folders)
+- Peak position refinement algorithm for large window sizes
+- Warnings for excessive window sizes that may affect accuracy
+- Proximity-based peak grouping for detecting multiple similar-height peaks
+- Enhanced detection of closely spaced peaks with similar prominence
+- User-selectable peaks interface with interactive table
+- Per-capillary peak selection for customized analysis
+
+### Changed
+- Default Savitzky-Golay window size from 21 to 25
+- Polynomial order for smoothing from 3 to 2 for more reliable results
+- Maximum allowed window size limited to 51 (from 101)
+- Multi-peak detection thresholds:
+  - Positive peak height threshold from 0.15 to 0.10
+  - Positive peak prominence threshold from 0.10 to 0.08
+  - Positive peak width minimum from 3 to 2
+  - Temperature separation requirement from 3.0°C to 2.0°C
+  - Added explicit peak distance parameter (5 points)
+- Negative peak (dip) detection parameters:
+  - Increased height threshold from 0.15 to 0.20
+  - Increased prominence threshold from 0.10 to 0.15
+  - Added additional validation for dips (min prominence 20% of max)
+- SNR requirements based on peak type (3.0 for dips, 2.0 for peaks)
+- Peak selection logic to retain peaks with similar prominence (≥70% of best peak)
+- Multi-peak detection approach from algorithmic to user-selectable
+- Relaxed filtering for potential peaks to provide more options to users
+
+### Fixed
+- Issue where "smoothed" data appeared less smooth than raw data
+- Bug where identified transitions weren't always displayed on plots
+- Duplicate transition labels in legend
+- Multi-peak detection compatibility with Two-state Boltzmann method
+- Missing shoulder peaks in complex unfolding patterns
+- False positive dips from baseline fluctuations
+- Input validation for window length parameters
+- Peak position shifts with large window sizes (>30)
+- Missing adjacent peaks with similar heights/prominence
+- Limitations of algorithmic peak selection with complex data
+
+### Improved
+- Peak display and classification in detailed curve views
+- Handling of edge cases with very short data arrays
+- Robustness of the smoothing algorithm across different datasets
+- Visual distinction between different types of transitions
+- Prioritization of biologically relevant positive peaks over dips
+- Multi-peak detection reliability across different window sizes
+- Overall performance on complex ternary systems with multiple transitions
+- Accuracy of peak position detection with large window sizes
+- Detection of multiple transitions within 7°C of each other
+- User control over peak selection and visualization
+- Flexibility in handling complex unfolding patterns
+
+### Technical Details
+- `analysis/calc/tm_calc.py`: Enhanced peak detection and filtering algorithm, added peak position refinement, added proximity-based peak grouping, modified to return all potential peaks
+- `analysis/tm_analysis.py`: Updated to support returning all potential peaks
+- `utils/io_utils.py`: Modified to pass return_all_peaks parameter when multi-peak detection is enabled
+- `visualization/plots.py`: Improved transition rendering and labeling
+- `main.py`: Modified window size handling and transition preparation, added warnings for large window sizes, added interactive peak selection table
+- `README.md`: Updated with data organization information
+
+This update significantly improves the application's ability to analyze complex protein melting curves, particularly for ternary systems and samples exhibiting multiple transitions. The new peak refinement algorithm ensures accurate peak position detection even with large smoothing windows. The proximity-based peak grouping algorithm enhances detection of closely spaced peaks with similar heights, which is critical for complex protein unfolding patterns. The user-selectable peaks interface gives researchers complete control over which transitions to analyze, addressing the limitations of purely algorithmic approaches.
+
+## [2025-05-21]
+### Added
+- **Enhanced Single-Point ΔTm Analysis**:
+  - Automatic ΔTm calculation for all other samples against a user-selected control.
+  - ΔTm results displayed in a table and bar chart.
+- **Automatic Experiment Type Detection**:
+  - Function to detect experiment type ('dose-response' or 'screening') from filenames (concentration diversity, 'DOSE/' or 'SP/' folder hints).
+  - `read_zip_data` updated to return CSV list for efficient type detection.
+- **Conditional UI for Analysis Sections**:
+  - Main UI now conditionally shows EC50 or ΔTm analysis sections based on detected experiment type.
+
+### Changed
+- **ΔTm Screening Logic**:
+  - The "Include" checkbox (formerly "Include in EC50") now correctly filters samples for ΔTm calculation and plotting.
+
+### Fixed
+- Resolved `ImportError` for `detect_experiment_type` by updating `utils/__init__.py`.
+- Corrected `TypeError: 'bool' object is not callable` by changing `df_results.empty()` to `df_results.empty`.
+
+## [Unreleased]
+- Added automatic channel selection functionality to improve data analysis efficiency.
+- Enhanced Gaussian deconvolution for better peak detection in complex protein melting curves.
+- Added debug options and window for improved troubleshooting and development.
+- Enabled Gaussian deconvolution in single-peak mode for improved Tm detection without requiring multi-peak detection.
+
+## [Previous Versions]
+- Initial release of the application.
+
+## [2025-05-28]
+## nanoDSF Analysis App - High-Resolution Data Improvements & Bug Fixes
+
+### Summary
+Major improvements to handle high-resolution nanoDSF data, fix AUC method issues, and provide better user flexibility for window size selection while preventing peak shifting problems.
+
+---
+
+## Changes Made
+
+### 1. **AUC Method Reprocessing Fix** ⚠️ **CRITICAL BUG FIX**
+- **Issue**: AUC method changes (method, baseline correction, smoothing window, interpolation factor) were not triggering data reanalysis
+- **Root Cause**: Missing AUC parameters in reprocessing condition checks
+- **Fix**: Added `auc_method`, `auc_baseline_correction`, `auc_smoothing_window`, `auc_interpolation_factor` to the needs_reprocessing logic in `main.py`
+- **Impact**: AUC settings now properly trigger data reanalysis when changed
+
+### 2. **High-Resolution Data Handling Improvements** (Later Reverted)
+- **Initial Implementation**: Added adaptive multi-stage smoothing for high-resolution data (>200 points)
+- **Features Added**:
+  - Automatic high-resolution detection
+  - Pre-smoothing followed by main smoothing for noisy data
+  - Noise assessment using signal-to-noise ratios
+  - Enhanced edge handling with automatic trimming (5% of data points)
+  - Aggressive edge dampening (25% vs 15%)
+  - Larger edge buffers for peak detection
+- **Outcome**: **REVERTED** due to severe curve misalignment issues
+
+### 3. **UI Window Size Limit Improvements**
+- **Original Limits**: 
+  - Find Peaks: 35 max
+  - Gaussian Deconvolution: 81 max
+- **Updated Limits**: 99 max for all methods
+- **Enhanced Warning System**:
+  - Window >25: Basic warning about peak shifting (method-specific)
+  - Window >35: Risk warning with suggestion to compare with smaller windows  
+  - Window >51: Strong error warning to use with caution
+- **Method-Specific Guidance**:
+  - Gaussian Deconvolution: Info note that it handles larger windows better
+  - Polynomial Fitting: Warning that it will correct positions
+  - Find Peaks: Strongest warning about peak shifting
+
+### 4. **Peak Shifting Crisis & Resolution**
+- **Problem Identified**: Large Savitzky-Golay windows inherently cause peak shifts (mathematical property)
+- **Failed Solution**: Implemented complex shift correction system with reference derivative tracking - **TOO AGGRESSIVE**
+- **Key Insight**: Peak shifting cannot be "fixed" algorithmically; it's fundamental to SG filter behavior
+- **Final Approach**: 
+  - Removed all aggressive "improvements"
+  - Provided clear warnings about window size effects
+  - Recommended alternative methods (Gaussian deconvolution, TSB) for noisy data
+
+### 5. **Curve Misalignment Fix** ⚠️ **CRITICAL BUG FIX**
+- **Issue**: Orange smoothed curve severely misaligned with blue raw data
+- **Symptoms**: Terminal warnings "Mismatch in lengths for smoothed data plotting. T: 934, Smooth: 842"
+- **Root Cause**: Aggressive edge trimming cutting 92 data points (934→842)
+- **Fix**: Removed all problematic preprocessing:
+  - Aggressive edge trimming (was cutting 5% of data points)
+  - Complex adaptive smoothing (was using different window sizes than requested)
+  - Multi-stage derivative smoothing (was over-processing data)
+- **Result**: Simplified to standard smoothing only, preserving all original data points
+
+### 6. **Variable Definition Fix** ⚠️ **CRITICAL BUG FIX**
+- **Issue**: `NameError: name 'window_length' is not defined` for AUC method
+- **Root Cause**: `window_length` only defined inside First derivative conditional block
+- **Fix**: 
+  - Initialize `window_length = 25` as default for all methods before conditional blocks
+  - For AUC method: `window_length = auc_smoothing_window`
+  - For First derivative: User-adjustable via number input
+  - For Boltzmann: Uses default value (25)
+
+### 7. **Polynomial Order Control**
+- **Added**: UI setting for Savitzky-Golay polynomial order (1, 2, 3)
+- **Guidance**: 
+  - Order 1: Less smooth, less peak shifting
+  - Order 2: Balanced (default)
+  - Order 3: Smoother, more shifting risk
+
+### 8. **AUC Direct Fluorescence Method Scientific Improvement** ⚠️ **CRITICAL SCIENCE FIX**
+- **Issue**: Original direct fluorescence AUC method was scientifically unsound
+  - Normalized fluorescence to [0,1] arbitrarily
+  - Found 50% of total area under normalized curve (no physical meaning)
+  - No connection to actual protein unfolding process
+- **Improved Implementation**:
+  - **Transition Detection**: Uses derivative analysis to identify actual transition boundaries
+  - **Unfolding Fraction Calculation**: Relates fluorescence change to physical unfolding process
+  - **Two Approaches**: 
+    - Primary: Find temperature where unfolding fraction = 0.5 (direct Tm definition)
+    - Fallback: Use 50% of cumulative unfolding area if half-point is unreliable
+  - **Baseline Correction**: Improved pre/post-transition baseline estimation
+  - **Quality Metrics**: Enhanced assessment including transition magnitude and shape analysis
+- **Scientific Rationale**: 
+  - Now properly relates fluorescence changes to protein unfolding thermodynamics
+  - Accounts for sigmoidal nature of protein transitions
+  - Provides meaningful transition boundaries and unfolding progress
+- **Visualization Improvements**:
+  - Shows unfolding fraction curve (0-1 scale representing unfolding progress)
+  - Displays transition boundaries
+  - Compares both Tm calculation approaches when different
+
+### 9. **AUC Direct Method Complete Scientific Overhaul** 🎯 **REVOLUTIONARY IMPROVEMENT**
+- **User Insight**: "Raw fluorescence/ratio is already the integral of derivatives, so we can directly find the max transition point"
+- **New Scientific Approach** (Based on user's excellent suggestion):
+  1. **Baseline Identification**: Uses derivative analysis to identify transition boundaries
+  2. **Linear Baseline Fitting**: Fits separate linear baselines to folded and unfolded states  
+  3. **Baseline Correction**: Removes linear trends using smooth interpolation between baselines
+  4. **Normalization**: Transforms corrected data to standard sigmoidal curve [0,1]
+  5. **4PL Fitting**: Applies 4-parameter logistic model (same as EC50 analysis)
+  6. **Tm Extraction**: EC50 parameter directly gives Tm
+- **Scientific Advantages**:
+  - **Physically Meaningful**: Directly relates to protein unfolding thermodynamics
+  - **Handles Different Baseline Slopes**: Separate linear fits for folded/unfolded states
+  - **Standard Method**: Uses same 4PL approach as dose-response analysis
+  - **Robust**: Fallback to midpoint method if 4PL fitting fails
+- **Implementation Features**:
+  - Automatic transition boundary detection
+  - Robust baseline fitting with fallbacks
+  - Sigmoid weighting for smooth baseline interpolation
+  - Comprehensive parameter bounds for 4PL fitting
+  - Enhanced quality metrics based on R², transition magnitude, parameter reasonableness
+- **Visualization Improvements**:
+  - Shows baseline-corrected and normalized fluorescence
+  - Displays 4PL fit curve with R² 
+  - Shows linear baselines for folded/unfolded states
+  - Dual y-axis plot for raw and normalized data
+  - Comprehensive parameter display (Hill slope, plateaus, etc.)
+- **User Interface Enhancements**:
+  - Detailed 4PL parameter display
+  - Baseline slope information
+  - Scientific method explanation with step-by-step process
+  - Enhanced error reporting with fallback method details
+
+**Key Quote from User**: "This idea sounds a lot like the original two state Boltzmann method in Prometheus Panta."
+**Result**: Now the AUC Direct method IS essentially a more sophisticated Boltzmann approach with proper baseline correction!
+
+### 10. **AUC Direct Method Removal** 🧹 **SIMPLIFICATION**
+- **User Feedback**: "Well there are quite a few issues. Sometimes you failed to find the unfolded baseline, sometime you failed to find the folded baseline, sometimes both failed."
+- **Issues Identified**:
+  - Baseline detection frequently failing for both folded and unfolded states
+  - Transformation process failing even when baselines were found
+  - Overly complex implementation with multiple failure points
+  - Method categorization confusion (transformation ≠ AUC)
+- **Resolution**: Removed direct AUC method entirely
+  - Simplified UI to only show derivative AUC option
+  - Removed all 4PL fitting and baseline correction code
+  - Updated visualization to only handle derivative method
+  - Simplified error handling and documentation
+- **Current Status**: AUC method now only uses derivative approach
+  - Calculates area under absolute derivative curve
+  - Finds 50% transition point
+  - Simple, reliable, and well-understood method
+- **User Insight**: "The transformation-based method should not be categorized in AUC anyway"
+- **Lesson Learned**: Sometimes simpler is better - stick to well-established, reliable methods
+
+---
+
+## Files Modified
+
+### Core Analysis Files
+- `main.py` - Main UI and processing logic updates
+- `analysis/calc/derivative_analysis.py` - Simplified smoothing approach
+
+### Removed Files (Cleanup)
+- `analysis/calc/tm_calc_new.py` - Removed problematic implementation
+- `test_*.py` files - Various debugging scripts removed
+
+---
+
+## Key Technical Lessons Learned
+
+1. **High-Resolution Data Challenges**:
+   - Higher sample rates amplify noise in derivatives
+   - Standard smoothing approaches may not be sufficient
+   - TSB method works better for very noisy data (fits overall shape, immune to noise)
+
+2. **Savitzky-Golay Filter Limitations**:
+   - Large windows inherently cause peak shifts (mathematical property)
+   - Cannot be "corrected" algorithmically without introducing other artifacts
+   - Window size is always a trade-off between noise reduction and position accuracy
+
+3. **Alternative Approaches for Noisy Data**:
+   - **Gaussian Deconvolution**: Handles noisy derivatives without shifting
+   - **Two-State Boltzmann**: Fits overall curve shape, immune to noise
+   - **Reduced Window Sizes**: Max 35 for Find Peaks to prevent shifting
+
+4. **Data Preprocessing Risks**:
+   - Aggressive edge trimming can cause complete curve misalignment
+   - Complex multi-stage processing can introduce more problems than it solves
+   - Simple, transparent approaches often work better than sophisticated "improvements"
+
+---
+
+## Current Status
+- ✅ All critical bugs fixed
+- ✅ AUC method working properly
+- ✅ Curve alignment restored
+- ✅ Flexible window size selection with proper warnings
+- ✅ App running on port 8506
+- ✅ High-resolution data can be processed (use TSB or Gaussian deconvolution for best results)
+
+## Recommendations for Users
+1. **For High-Resolution Noisy Data**: Use Two-State Boltzmann or Gaussian Deconvolution methods
+2. **For Find Peaks Method**: Keep window sizes ≤35 to prevent peak shifting
+3. **For Very Noisy Data**: Consider using Gaussian deconvolution which handles noise without position errors
+4. **Window Size Selection**: Start with default (25), increase cautiously with awareness of trade-offs
+
+---
+
+*Log created: 2025-05-28*
+*App Status: Operational on port 8506* 

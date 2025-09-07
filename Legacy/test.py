@@ -1,0 +1,108 @@
+#!/usr/bin/env python
+# psma_global_fit_robust.py
+import zipfile, re, warnings
+from io import BytesIO
+import numpy as np, pandas as pd
+from scipy.signal import savgol_filter
+from scipy.optimize import curve_fit, least_squares, OptimizeWarning
+from scipy.special import expit
+
+warnings.filterwarnings("ignore", category=OptimizeWarning)
+
+# ---------------- user settings ----------------
+ZIP_PATH   = "PSMA-DOSE.zip"
+CHANNEL    = "350"          # "ratio" / "330" / "350"
+DROP_488N  = True
+LAMBDA_REG = 1e-2             # soft prior on log(Kd)
+# ------------------------------------------------
+
+def parse_conc(f):                       # µM  →  M
+    m = re.search(r"Zn_([\d.]+)", f)
+    return None if m is None else float(m.group(1))*1e-6
+
+def pl4(C, Tm0, dTm, Kd, n):
+    return Tm0 + dTm*(C**n)/(Kd**n + C**n)
+
+# ---------- load one-file-per-conc ----------
+traces = []                              # (conc, T, F)
+with zipfile.ZipFile(ZIP_PATH) as zf:
+    for f in zf.namelist():
+        if "/" in f: continue
+        if not f.endswith("_unfolding_raw.csv"): continue
+        if CHANNEL not in f.lower(): continue
+        conc = parse_conc(f)
+        if conc is None or (DROP_488N and np.isclose(conc, 4.88e-8)): continue
+        df = pd.read_csv(BytesIO(zf.read(f)), sep="\t")
+        traces.append((conc, df.iloc[:,0].values, df.iloc[:,1].values))
+
+if len(traces) < 6:
+    raise RuntimeError("too few traces")
+
+# ---------- robust Tm by derivative peak ----------
+rows = []
+for conc, T, F in traces:
+    # Savitzky-Golay smooth
+    y_sg = savgol_filter(F, 21, 3, mode="interp")
+    d1   = np.gradient(y_sg, T)
+    Tm   = float(T[np.argmax(d1)])
+    rows.append({"conc": conc, "Tm": Tm})
+indiv = pd.DataFrame(rows).sort_values("conc")
+
+# ---------- two-stage 4PL (median) -------------
+tm_med = indiv.groupby("conc")["Tm"].median().reset_index()
+p0_ts  = [tm_med["Tm"].min(),
+          tm_med["Tm"].max()-tm_med["Tm"].min(),
+          np.median(tm_med["conc"]), 1.0]
+bounds = ([0,0,1e-9,0.1],[150,150,1e-2,5.0])
+p_ts, pcov_ts = curve_fit(pl4, tm_med["conc"], tm_med["Tm"],
+                          p0=p0_ts, bounds=bounds, maxfev=10000)
+Tm0_ts, dTm_ts, Kd_ts, n_ts = p_ts
+se_ts = np.sqrt(np.diag(pcov_ts))[2]
+tm_med["Tm_4PL"] = pl4(tm_med["conc"], *p_ts)
+
+# ---------- global 4PL on raw traces ----------
+T_all = np.concatenate([T for _,T,_ in traces])
+F_all = np.concatenate([F for _,_,F in traces])
+C_all = np.concatenate([np.full_like(T, c) for c, T, _ in traces])
+
+p0g = np.array([Tm0_ts, dTm_ts, Kd_ts, n_ts])
+lb  = np.array([Tm0_ts-2, 0.5*dTm_ts, 0.3*Kd_ts, 0.8])
+ub  = np.array([Tm0_ts+2, 1.5*dTm_ts, 3.0*Kd_ts, 1.2])
+eps = 1e-8
+for i in range(4):                     # ensure lb < p0 < ub
+    if not lb[i] < ub[i]: ub[i] = lb[i] + eps
+    if not (lb[i] < p0g[i] < ub[i]): p0g[i] = (lb[i]+ub[i])/2
+
+def resid(par):
+    Tm0, dTm, Kd, n = par
+    Tm_vals = pl4(C_all, Tm0, dTm, Kd, n)
+    # use raw F linearly rescaled: s = (Tm_val - 25)/(95-25)
+    s = np.clip((Tm_vals-25)/70, 0, 1)
+    model = (1-s)*F_all.min() + s*F_all.max()   # simple linear unfold
+    reg = LAMBDA_REG * (np.log10(Kd) - np.log10(Kd_ts))
+    return np.concatenate([model - F_all, [reg]])
+
+res = least_squares(resid, p0g, bounds=(lb,ub),
+                    method="trf", ftol=1e-10, xtol=1e-10, max_nfev=50000)
+Tm0_g, dTm_g, Kd_g, n_g = res.x
+J  = res.jac
+sigma2 = np.sum(res.fun**2)/(len(F_all)-4)
+se_g_kd = np.sqrt(np.linalg.pinv(J.T@J)[2,2]*sigma2)
+
+tm_med["Tm_global"] = pl4(tm_med["conc"], Tm0_g, dTm_g, Kd_g, n_g)
+tm_med["Res_global"] = tm_med["Tm_global"] - tm_med["Tm"]
+
+# ---------- report ----------
+pd.set_option("display.float_format","{:.4f}".format)
+print(f"\n---  Tm per concentration ({CHANNEL})  ---")
+print(tm_med.to_string(index=False))
+
+comp = pd.DataFrame({
+    "Method":["Two-stage 4PL","Global 4PL"],
+    "Kd(M)":[Kd_ts,Kd_g],
+    "SE":[se_ts,se_g_kd],
+    "CI width":[2*1.96*se_ts,2*1.96*se_g_kd],
+    "SNR":[Kd_ts/se_ts,Kd_g/se_g_kd]
+})
+print("\n---  Kd comparison  ---")
+print(comp.to_string(index=False, float_format="%.3e"))
