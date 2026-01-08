@@ -125,24 +125,40 @@ def register_analysis_callbacks(app: Dash) -> None:
         State('analysis-results-store', 'data'),
         prevent_initial_call=True
     )
-    def update_concentration_from_table(table_data, results_data):
-        """当用户编辑浓度时更新底层数据"""
+    def update_table_edits(table_data, results_data):
+        """当用户编辑表格（Sample名称或浓度）时更新底层数据"""
         if not table_data or not results_data or not results_data.get('results'):
             return no_update, no_update
 
         results = results_data['results']
+        updated = False
 
-        # 解析用户输入的浓度(默认单位为M,不做任何转换)
+        # 处理用户编辑
         for i, row in enumerate(table_data):
             if i >= len(results):
                 break
 
+            # 处理 Sample 名称编辑
+            new_sample_name = row.get('Sample', '').strip()
+            if new_sample_name and new_sample_name != results[i]['name']:
+                # 保存原始名称到自定义映射
+                original_name = results[i].get('original_name', results[i]['name'])
+                if 'original_name' not in results[i]:
+                    results[i]['original_name'] = results[i]['name']
+
+                # 更新显示名称
+                results[i]['name'] = new_sample_name
+                updated = True
+
+            # 处理浓度编辑 (保留原有逻辑)
             conc_str = row.get('Concentration (M)', 'N/A')
             if conc_str and conc_str != 'N/A':
                 try:
                     # 直接解析为浮点数,默认单位为M
                     conc_val = float(conc_str.strip())
-                    results[i]['concentration'] = conc_val
+                    if results[i].get('concentration') != conc_val:
+                        results[i]['concentration'] = conc_val
+                        updated = True
                 except (ValueError, AttributeError):
                     # 解析失败,保持原值
                     pass
@@ -387,8 +403,8 @@ def register_analysis_callbacks(app: Dash) -> None:
                 # Note: result_dict is already in all_results (from parallel or serial processing)
                 # Thermodynamic data was added in-place to existing result_dict
 
-            # 保留用户手动编辑的浓度信息
-            # 只有在数据集未变化的情况下才保留浓度(通过比较文件名判断)
+            # 保留用户手动编辑的浓度和样本名称
+            # 只有在数据集未变化的情况下才保留(通过比较文件名判断)
             if previous_results_data and 'results' in previous_results_data and 'filenames' in previous_results_data:
                 # 检查是否是同一个数据集(文件名相同)
                 prev_filenames = previous_results_data.get('filenames', [])
@@ -396,17 +412,34 @@ def register_analysis_callbacks(app: Dash) -> None:
 
                 if same_dataset:
                     previous_results = previous_results_data['results']
-                    # 创建样品名到浓度的映射
-                    prev_conc_map = {r['name']: r.get('concentration') for r in previous_results}
+                    # 创建原始名称到用户数据的映射
+                    # 使用原始名称作为键,以便在重新分析后仍能匹配
+                    prev_data_map = {}
+                    for r in previous_results:
+                        # 如果有保存的原始名称,用它作为键;否则用当前名称
+                        key = r.get('original_name', r['name'])
+                        prev_data_map[key] = {
+                            'custom_name': r['name'],
+                            'concentration': r.get('concentration'),
+                            'had_original': 'original_name' in r
+                        }
 
-                    # 更新新结果中的浓度(如果之前有手动输入过)
+                    # 更新新结果中的浓度和样本名称(如果之前有手动编辑过)
                     for result in all_results:
-                        sample_name = result['name']
-                        if sample_name in prev_conc_map:
-                            prev_conc = prev_conc_map[sample_name]
-                            # 只有当之前的浓度不为None时才覆盖(保留用户输入)
-                            if prev_conc is not None:
-                                result['concentration'] = prev_conc
+                        # 使用当前的name(清理后的文件名)作为原始名称
+                        original_name = result['name']
+
+                        if original_name in prev_data_map:
+                            prev_data = prev_data_map[original_name]
+
+                            # 恢复自定义样本名称
+                            if prev_data['had_original']:
+                                result['original_name'] = original_name
+                                result['name'] = prev_data['custom_name']
+
+                            # 恢复浓度(只有当之前有值时)
+                            if prev_data['concentration'] is not None:
+                                result['concentration'] = prev_data['concentration']
 
             t_compute_end = time.time()
             total_compute_time = t_compute_end - t_compute_start
@@ -548,9 +581,9 @@ def _create_results_table(results: list):
 
         table_data.append(row_data)
 
-    # 定义列 - Concentration (M)列设为可编辑
+    # 定义列 - Sample 和 Concentration (M) 列设为可编辑
     columns = [
-        {"name": "Sample", "id": "Sample", "editable": False},
+        {"name": "Sample", "id": "Sample", "editable": True},
         {"name": "Concentration (M)", "id": "Concentration (M)", "editable": True},
         {"name": "Tm (°C)", "id": "Tm (°C)", "editable": False},
         {"name": quality_col_header, "id": quality_col_header, "editable": False},

@@ -38,7 +38,10 @@ class AppState:
     active_tab: str = "basic"
     selected_capillary_indices: List[int] = field(default_factory=list)
     selected_ec50_indices: List[int] = field(default_factory=list)
-    
+
+    # =========== 用户自定义 ===========
+    custom_sample_names: Dict[str, str] = field(default_factory=dict)  # {original_name: custom_name}
+
     # =========== 缓存 ===========
     _cache: Dict[str, Any] = field(default_factory=dict)
     _last_analysis_time: Optional[datetime] = None
@@ -52,6 +55,7 @@ class AppState:
         self.vanthoff_result = None
         self.selected_capillary_indices = []
         self.selected_ec50_indices = []
+        self.custom_sample_names = {}
         self._cache = {}
         self._last_analysis_time = None
     

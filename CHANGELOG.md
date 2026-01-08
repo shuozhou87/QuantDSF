@@ -18,8 +18,19 @@
   - 实现位置: `core/utils/parser.py:clean_sample_name()`
   - 影响文件: `core/io/parsers/prometheus.py`, `core/io/parsers/tycho.py`
 
+- **可编辑的样本名称**: Sample 列现在可以直接编辑
+  - 用户可以自定义样本名称 (例如: `XBB` → `Mpro+Nirmatrelvir`)
+  - 编辑的名称会在切换标签页时保留
+  - 编辑的名称会在重新分析时保留（使用相同数据集时）
+  - 只有在上传新文件或明确删除文件时才会重置
+  - 实现位置: `app/callbacks/analysis_callbacks.py:update_table_edits()`
+  - 状态管理: 原始名称保存在 `result['original_name']` 中
+
 ### Changed
 - 改进了 UI 表格的可读性，Sample 列现在显示简洁的样本标识符
+- Sample 列从只读改为可编辑 (`editable: True`)
+- 扩展了表格编辑 callback 以同时处理样本名称和浓度编辑
+- 改进了重新分析时的数据保留逻辑,现在同时保留自定义样本名称和浓度
 
 ---
 
