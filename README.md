@@ -1,6 +1,6 @@
 # QuantDSF v2.0
 
-Advanced analysis platform for nanoDSF (nano Differential Scanning Fluorimetry) data from NanoTemper Prometheus NT.48 and Tycho NT.6 instruments.
+Advanced analysis platform for nanoDSF (nano Differential Scanning Fluorimetry) data from NanoTemper Prometheus NT.Panta and Tycho NT.6 instruments.
 
 ## Overview
 
