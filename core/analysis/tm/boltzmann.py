@@ -191,26 +191,48 @@ def fit_boltzmann_model(
 
 
 def _fit_exponential_model(
-    T: np.ndarray, 
+    T: np.ndarray,
     F: np.ndarray,
     initial_guess: Optional[list],
     bounds: Optional[Tuple]
 ) -> Dict[str, Any]:
     """拟合指数基线 Boltzmann 模型"""
-    
+
+    # 使用V1的成功策略：无边界约束或非常宽松的边界
+    # V1不使用bounds，让优化器有更大自由度
     if bounds is None:
-        bounds = _generate_exp_bounds(T, F)
-    
+        # 使用非常宽松的边界，主要防止数值溢出
+        F_min, F_max = F.min(), F.max()
+        F_range = F_max - F_min
+        T_min, T_max = T.min(), T.max()
+
+        # 极宽松的边界（比原来宽10倍）
+        lower_bounds = [
+            -F_range * 10, -1.0, F_min - F_range * 10,
+            -F_range * 10, -1.0, F_min - F_range * 10,
+            T_min - 50, 0.001
+        ]
+        upper_bounds = [
+            F_range * 10, 1.0, F_max + F_range * 10,
+            F_range * 10, 1.0, F_max + F_range * 10,
+            T_max + 50, 10.0
+        ]
+        bounds = (lower_bounds, upper_bounds)
+
+    # 使用V1的初始参数策略
+    F_center = (F.max() + F.min()) / 2
+    T_center = (T.max() + T.min()) / 2
+
     initial_guesses = []
     if initial_guess is not None:
         initial_guesses.append(initial_guess)
-    # 保守初猜：直接用数据中位作为 Tm，k=0.2，alpha/beta=0
-    T_med = float(np.median(T))
-    F_min, F_max = F.min(), F.max()
-    ig_simple = [0.0, 0.0, F_min, 0.0, 0.0, F_max, T_med, 0.2]
-    initial_guesses.append(ig_simple)
-    # 原有启发式
-    initial_guesses.append(_generate_exp_initial_guess(T, F))
+
+    # V1的3组初猜（已验证有效，R²=0.998）
+    initial_guesses.extend([
+        [F.max(), 0.005, F.min(), F.max()*0.8, 0.005, F.min()*1.2, T_center, 0.3],
+        [F.max(), 0.01, F.min(), F.max()*0.9, 0.01, F.min()*1.1, T_center, 0.4],
+        [F.max(), 0.003, F.min(), F.max()*0.7, 0.003, F.min()*1.3, T_center, 0.2],
+    ])
     
     best_rss = float('inf')
     best_popt = None
@@ -289,25 +311,36 @@ def _fit_exponential_model(
 
 
 def _fit_linear_model(
-    T: np.ndarray, 
+    T: np.ndarray,
     F: np.ndarray,
     initial_guess: Optional[list],
     bounds: Optional[Tuple]
 ) -> Dict[str, Any]:
     """拟合线性基线 Boltzmann 模型"""
-    
+
     if initial_guess is None:
         initial_guess = _generate_linear_initial_guess(T, F)
-    
+
     if bounds is None:
         bounds = _generate_linear_bounds(T, F)
-    
-    popt, pcov = curve_fit(
-        boltzmann_linear, T, F,
-        p0=initial_guess,
-        bounds=bounds,
-        maxfev=5000
-    )
+
+    try:
+        popt, pcov = curve_fit(
+            boltzmann_linear, T, F,
+            p0=initial_guess,
+            bounds=bounds,
+            maxfev=5000
+        )
+    except Exception as e:
+        # 线性拟合失败，返回失败结果
+        return {
+            'success': False,
+            'error': str(e),
+            'Tm': np.nan,
+            'R_squared': 0.0,
+            'parameters': {},
+            'fitted_curve': np.full_like(F, np.nan)
+        }
     
     A_N, B_N, A_D, B_D, Tm, k = popt
     
@@ -432,6 +465,7 @@ def _generate_exp_bounds(T: np.ndarray, F: np.ndarray) -> Tuple:
 def _linear_to_exp_guess(T: np.ndarray, linear_result: Dict[str, Any]) -> list:
     """
     将线性拟合结果转换为指数模型的初始猜测（保守映射）。
+    确保生成的初猜在指数模型的边界范围内。
     """
     params = linear_result.get("parameters", {})
     A_N_lin = params.get("A_N", 0.0)
@@ -441,15 +475,32 @@ def _linear_to_exp_guess(T: np.ndarray, linear_result: Dict[str, Any]) -> list:
     Tm_lin = params.get("Tm", float(np.median(T)))
     k_lin = params.get("k", 0.2)
 
+    # 获取温度和荧光范围（用于边界检查）
     T_min, T_max = T.min(), T.max()
+
+    # 从linear_result中获取荧光数据来计算范围
+    fitted_curve = linear_result.get('fitted_curve')
+    if fitted_curve is not None and len(fitted_curve) > 0:
+        F_min, F_max = fitted_curve.min(), fitted_curve.max()
+    else:
+        # 回退：使用Tm处的基线估计
+        F_N_at_Tm = A_N_lin * Tm_lin + B_N_lin
+        F_D_at_Tm = A_D_lin * Tm_lin + B_D_lin
+        F_min = min(F_N_at_Tm, F_D_at_Tm) * 0.9
+        F_max = max(F_N_at_Tm, F_D_at_Tm) * 1.1
+
+    F_range = F_max - F_min
+
     # 将线性截距映射为指数偏移，将斜率映射为微弱的 alpha/beta
     A_N = 0.0
     alpha = np.clip(A_N_lin / max(abs(B_N_lin) + 1e-6, 1.0) * 0.01, -0.05, 0.05)
-    D_N = B_N_lin
+    # 确保D_N在边界内 [F_min - F_range, F_max + F_range]
+    D_N = np.clip(B_N_lin, F_min - F_range, F_max + F_range)
 
     A_D = 0.0
     beta = np.clip(A_D_lin / max(abs(B_D_lin) + 1e-6, 1.0) * 0.01, -0.05, 0.05)
-    D_D = B_D_lin
+    # 确保D_D在边界内
+    D_D = np.clip(B_D_lin, F_min - F_range, F_max + F_range)
 
     Tm_guess = float(np.clip(Tm_lin, T_min, T_max))
     k_guess = float(np.clip(k_lin, 0.05, 1.0))

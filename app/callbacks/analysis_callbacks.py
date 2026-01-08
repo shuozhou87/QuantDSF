@@ -551,9 +551,15 @@ def _create_results_table(results: list):
     # Check if thermodynamic data is available
     has_thermo_data = any(r.get('delta_G_std') is not None for r in results)
 
+    # 按浓度排序（低到高），无浓度的排在最后
+    sorted_results = sorted(
+        results,
+        key=lambda r: (r.get('concentration') is None, r.get('concentration') or float('inf'))
+    )
+
     # 准备数据
     table_data = []
-    for i, r in enumerate(results):
+    for i, r in enumerate(sorted_results):
         conc_str = format_concentration(r['concentration']) if r['concentration'] else 'N/A'
         tm_str = f"{r['tm']:.1f}" if r['tm'] is not None else 'N/A'
 
@@ -563,6 +569,21 @@ def _create_results_table(results: list):
         else:
             r2_str = f"{r['r_squared']:.3f}" if r['r_squared'] is not None else 'N/A'
 
+        # 生成Status的tooltip（悬停提示）
+        status_tooltip = r['quality_flag']
+        if r['quality_flag'] == '⚠️':
+            # 警告状态：显示具体原因
+            if r['method'] == 'derivative':
+                # First Derivative方法使用SNR
+                snr_threshold = 3.0
+                status_tooltip = f"Low SNR: {r['r_squared']:.1f} (threshold: {snr_threshold})"
+            else:
+                # 其他方法使用R²
+                r2_threshold = 0.90
+                status_tooltip = f"Low R²: {r['r_squared']:.3f} (threshold: {r2_threshold:.2f})"
+        elif r['quality_flag'] == '❌':
+            status_tooltip = "Analysis failed or Tm not found"
+
         row_data = {
             'index': i,
             'Sample': r['name'],
@@ -570,7 +591,8 @@ def _create_results_table(results: list):
             'Tm (°C)': tm_str,
             quality_col_header: r2_str,
             'Method': r['method'].upper(),
-            'Status': r['quality_flag']
+            'Status': r['quality_flag'],
+            'Status_tooltip': status_tooltip  # 添加tooltip数据
         }
 
         # Add thermodynamic parameters if available
@@ -609,7 +631,7 @@ def _create_results_table(results: list):
         data=table_data,
         editable=True,  # 启用编辑
         row_selectable='multi',
-        selected_rows=list(range(len(results))),  # 默认全选
+        selected_rows=list(range(len(sorted_results))),  # 默认全选（使用sorted结果的长度）
         style_table={'overflowX': 'auto'},
         style_cell={
             'textAlign': 'left',
@@ -621,6 +643,17 @@ def _create_results_table(results: list):
             'fontWeight': 'bold',
             'borderBottom': '2px solid #dee2e6'
         },
+        # 添加tooltip功能
+        tooltip_data=[
+            {
+                'Status': {'value': row.get('Status_tooltip', row['Status']), 'type': 'markdown'}
+            } for row in table_data
+        ],
+        tooltip_duration=None,  # tooltip持续显示直到鼠标移开
+        css=[{
+            'selector': '.dash-table-tooltip',
+            'rule': 'background-color: #333; color: white; font-size: 12px; padding: 8px; border-radius: 4px;'
+        }],
         style_data_conditional=[
             {
                 'if': {'column_id': 'Concentration (M)'},
@@ -989,6 +1022,29 @@ def _create_tm_distribution_plot(results: list) -> go.Figure:
         margin=dict(l=60, r=20, t=60, b=100),
         xaxis_tickangle=-45
     )
-    
+
     return fig
+
+
+def register_loading_message_callback(app: Dash):
+    """注册加载消息更新回调"""
+
+    @app.callback(
+        Output('loading-status-message', 'children'),
+        Input('method-selector', 'value'),
+        Input('run-analysis-btn', 'n_clicks'),
+        prevent_initial_call=True
+    )
+    def update_loading_message(method, n_clicks):
+        """根据选择的方法更新加载消息"""
+        if ctx.triggered_id == 'run-analysis-btn' and n_clicks:
+            method_messages = {
+                'boltzmann': '🔬 Fitting Two-State Boltzmann model...',
+                'auc': '📊 Calculating Area Under Curve with Hill equation...',
+                'derivative': '📉 Computing First Derivative peaks...'
+            }
+            return method_messages.get(method, '⚙️ Analyzing data...')
+
+        # 默认消息
+        return '⚙️ Ready to analyze...'
 

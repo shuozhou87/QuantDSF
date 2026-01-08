@@ -38,9 +38,22 @@ def _create_basic_analysis_initial_layout():
                 dbc.Badge("0 samples", id="sample-count-badge", color="secondary", className="ms-2")
             ]),
             dbc.CardBody([
-                html.Div(id="results-table-container", children=[
-                    html.P("Waiting for data...", className="text-muted text-center py-5")
-                ])
+                dcc.Loading(
+                    id="loading-results",
+                    type="default",
+                    fullscreen=False,
+                    children=html.Div(id="results-table-container", children=[
+                        html.P("Waiting for data...", className="text-muted text-center py-5")
+                    ]),
+                    overlay_style={"visibility": "visible", "opacity": 0.7, "filter": "blur(2px)"},
+                    custom_spinner=html.Div([
+                        dbc.Spinner(color="primary", size="lg", spinner_style={"width": "4rem", "height": "4rem"}),
+                        html.Div(id="loading-status-message",
+                                children="Analyzing data...",
+                                className="text-primary fw-bold mt-3",
+                                style={"fontSize": "1.3rem"})
+                    ], className="text-center", style={"paddingTop": "50px"})
+                )
             ])
         ], className="shadow-sm mb-4"),
 

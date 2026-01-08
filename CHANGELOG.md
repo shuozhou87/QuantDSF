@@ -8,7 +8,54 @@
 
 ## [Unreleased] - 2026-01-08
 
+### Fixed
+- **恢复浓度排序和Status tooltip功能**: 修复之前丢失的表格功能
+  - **浓度排序**: 表格按浓度从低到高自动排序，无浓度样本排在最后
+  - **Status tooltip**: 鼠标悬停在⚠️上显示具体原因
+    - 示例: "Low R²: 0.816 (threshold: 0.90)"
+    - 示例: "Low SNR: 2.1 (threshold: 3.0)" (First Derivative方法)
+  - 修改位置: [app/callbacks/analysis_callbacks.py:554-656](app/callbacks/analysis_callbacks.py#L554-L656)
+
+- **[严重] 修复TSB拟合R²显著低于V1的回归问题**: 恢复V1的初始参数策略
+  - **问题**: 330nm通道RPA+ssDNA数据集TSB拟合R²平均0.84-0.94，远低于V1的0.998
+  - **根本原因**: V2重写时错误使用了`_backup_v1/analysis/calc/boltzmann_fitting.py`的初始参数策略，但V1实际使用的是`_backup_v1/analysis/tm_analysis.py`中`analyze_tm_boltzmann`函数的策略
+  - **关键差异**:
+    1. **V1成功策略**（`analyze_tm_boltzmann`）:
+       - 初猜使用数据范围的倍数关系：`A_N=F.max(), A_D=F.max()*0.8`
+       - alpha/beta初猜：0.005, 0.01, 0.003（非零小值）
+       - k初猜：0.3, 0.4, 0.2（较大值）
+       - **无边界约束**，优化器有更大自由度
+    2. **V2错误策略**（原`_fit_exponential_model`）:
+       - 初猜：`A_N=0.0, A_D=0.0, alpha=0.0, beta=0.0`（退化为常数基线）
+       - 严格边界：alpha/beta ∈ [-0.1, 0.1]
+       - k ∈ [0.01, 1.0]
+  - **修复** ([core/analysis/tm/boltzmann.py:193-235](core/analysis/tm/boltzmann.py#L193-L235)):
+    1. 采用V1的3组初始参数:
+       ```python
+       [F.max(), 0.005, F.min(), F.max()*0.8, 0.005, F.min()*1.2, T_center, 0.3],
+       [F.max(), 0.01, F.min(), F.max()*0.9, 0.01, F.min()*1.1, T_center, 0.4],
+       [F.max(), 0.003, F.min(), F.max()*0.7, 0.003, F.min()*1.3, T_center, 0.2]
+       ```
+    2. 极大放宽边界约束（10倍原值），接近V1的无约束策略
+    3. alpha/beta ∈ [-1.0, 1.0]（原[-0.1, 0.1]）
+    4. k ∈ [0.001, 10.0]（原[0.01, 1.0]）
+  - **修复效果**: 330nm通道RPA+ssDNA数据集
+    - R²平均值: 0.8487 → **0.9977** （接近V1的0.9983）
+    - R² ≥ 0.99: 6/16 (37.5%) → **15/16 (93.8%)**
+    - R²最小值: 0.7038 → **0.9888**
+  - **教训**: V1代码混乱有多个boltzmann实现，迁移时应识别真正使用的版本
+
 ### Added
+- **改进的加载状态反馈**: 分析运行时显示更清晰的加载提示
+  - 页面内容变灰并带模糊效果（opacity: 0.7, filter: blur(2px)）
+  - 大号spinner（4rem × 4rem）
+  - 根据分析方法动态显示具体消息:
+    - Two-State Boltzmann: "🔬 Fitting Two-State Boltzmann model..."
+    - AUC: "📊 Calculating Area Under Curve with Hill equation..."
+    - First Derivative: "📉 Computing First Derivative peaks..."
+  - 实现位置: [app/layouts/main_layout.py:41-56](app/layouts/main_layout.py#L41-L56), [app/callbacks/analysis_callbacks.py:996-1017](app/callbacks/analysis_callbacks.py#L996-L1017)
+  - 用户反馈: 解决了"不知道是否卡死"的体验问题
+
 - **样本名称自动清理功能**: 在 Analysis Results 表格中的 Sample 列现在会自动清理冗余信息
   - 自动移除浓度信息（科学计数法、带单位、小数格式）
   - 移除占位浓度 `_0_`
@@ -26,6 +73,18 @@
   - 实现位置: `app/callbacks/analysis_callbacks.py:update_table_edits()`
   - 状态管理: 原始名称保存在 `result['original_name']` 中
 
+- **浓度排序**: Analysis Results 表格现在按浓度从低到高自动排序
+  - 没有浓度信息的样本排在最后
+  - 帮助用户快速识别浓度依赖性趋势
+  - 实现位置: `app/callbacks/analysis_callbacks.py:_create_results_table()`
+
+- **质量警告详情提示**: Status 列的警告标记 (⚠️) 现在支持悬停提示
+  - 鼠标悬停在 ⚠️ 上会显示具体原因
+  - 例如: "Low R²: 0.444 (threshold: 0.90)"
+  - 例如: "Low SNR: 2.1 (threshold: 3.0)" (一阶导数法)
+  - 帮助用户快速诊断数据质量问题
+  - 实现位置: `app/callbacks/analysis_callbacks.py:run_tm_analysis()`, `_create_results_table()`
+
 ### Changed
 - 改进了 UI 表格的可读性，Sample 列现在显示简洁的样本标识符
 - Sample 列从只读改为可编辑 (`editable: True`)
@@ -38,6 +97,27 @@
   - 确保切换频道(330nm ↔ 350nm ↔ ratio)时用户编辑的样本名称和浓度正确保留
   - 简化匹配逻辑,依赖改进的 `clean_sample_name()` 函数
   - 实现位置: `core/utils/parser.py:clean_sample_name()`, `app/callbacks/analysis_callbacks.py`
+
+- **[严重] 修复 Boltzmann 拟合 Tm 错误问题**: TSB 方法对某些数据给出完全错误的 Tm 值
+  - **根本原因**: 指数基线模型的参数边界和初始猜测不当，导致优化器陷入局部最优解
+  - **症状**: BSA 35.2 nM 样本 Tm 显示 104°C（或 37°C），而正确值应该在 ~62°C
+  - **详细分析**:
+    1. 原始边界允许 Tm 超出数据范围 ±10°C，k (steepness) 下界为 0.01
+    2. 这导致拟合器将 Tm 推到数据范围外，用极小的 k 值强行拟合
+    3. 指数基线模型对某些数据（如 BSA）过于复杂，线性模型更稳健
+  - **修复方案**:
+    1. 收紧 Tm 边界为 ±2°C，k 下界提高到 0.05 ([core/analysis/tm/boltzmann.py:417-431](core/analysis/tm/boltzmann.py#L417-L431))
+    2. 改进初始猜测逻辑，根据信号趋势智能设置基线 ([core/analysis/tm/boltzmann.py:212-228](core/analysis/tm/boltzmann.py#L212-L228))
+    3. 添加边界检查，拒绝Tm和k同时撞界的结果 ([core/analysis/tm/boltzmann.py:247-263](core/analysis/tm/boltzmann.py#L247-L263))
+    4. **关键修复**: 实现指数→线性模型自动回退机制 ([app/callbacks/analysis_callbacks.py:52-82](app/callbacks/analysis_callbacks.py#L52-L82))
+       - 先尝试指数模型，检查 Tm 是否在合理范围内且 k > 0.08
+       - 如果不合理，自动回退到线性基线模型（更稳健）
+  - **修复效果**: BSA 35.2 nM 现在正确显示 Tm ≈ 62°C（线性模型，R² = 0.9985）
+
+- **[已回退] 修复浓度排序导致的数据错配问题**: 此问题实际上不是排序引起的
+  - 原始诊断错误：怀疑是排序导致索引映射错误
+  - 实际原因：Boltzmann 拟合本身就给出了错误的 Tm 值（见上一条修复）
+  - 排序相关的修复（添加 `_original_index`）已实现但不是根本原因
 
 ---
 
