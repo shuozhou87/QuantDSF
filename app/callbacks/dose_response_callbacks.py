@@ -1,0 +1,274 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Dose-Response Analysis Callbacks
+==================================
+Callbacks for Tm vs Concentration EC50 analysis
+"""
+
+from dash import Dash, Input, Output, State, html, no_update, dash_table
+import dash_bootstrap_components as dbc
+import plotly.graph_objects as go
+import numpy as np
+from core.analysis.dose_response_ec50 import fit_tm_ec50, hill4_tm
+
+
+def register_dose_response_callbacks(app: Dash) -> None:
+    """Register dose-response analysis callbacks"""
+
+    @app.callback(
+        Output('dr-selection-table', 'data'),
+        Output('dr-selection-table', 'selected_rows'),
+        Output('dr-selection-hint', 'children'),
+        Input('analysis-results-store', 'data'),
+        Input('main-tabs', 'active_tab'),
+        prevent_initial_call=True
+    )
+    def populate_dr_table(results_data, active_tab):
+        """Populate dose-response data selection table"""
+        if active_tab != 'dose':
+            return no_update, no_update, no_update
+
+        if not results_data or not results_data.get('results'):
+            return [], [], "No analysis data. Run Tm analysis first."
+
+        results = results_data['results']
+        rows = []
+        auto_selected = []
+
+        for idx, r in enumerate(results):
+            tm = r.get('tm')
+            r2 = r.get('r_squared')
+            conc = r.get('concentration')
+            conc_nM = conc * 1e9 if conc is not None else None
+
+            rows.append({
+                "name": r.get('name'),
+                "conc_nM": f"{conc_nM:.2f}" if conc_nM is not None else "N/A",
+                "tm": f"{tm:.1f}" if tm is not None else "N/A",
+                "r2": f"{r2:.3f}" if r2 is not None else "N/A",
+                "method": r.get('method', '').upper(),
+                "quality": r.get('quality_flag', '')
+            })
+
+            # Auto-select high quality fits (R² ≥ 0.85) with valid concentration
+            if r2 is not None and r2 >= 0.85 and conc is not None and np.isfinite(conc) and conc > 0:
+                auto_selected.append(idx)
+
+        hint = f"{len(rows)} total samples; auto-selected {len(auto_selected)} high-quality points (R² ≥ 0.85). Adjust selection as needed."
+
+        return rows, auto_selected, hint
+
+    @app.callback(
+        Output('dr-ec50-results', 'children'),
+        Output('dose-response-plot', 'figure'),
+        Input('dr-run-btn', 'n_clicks'),
+        State('analysis-results-store', 'data'),
+        State('dr-selection-table', 'selected_rows'),
+        State('dr-selection-table', 'data'),
+        prevent_initial_call=True
+    )
+    def run_dose_response_analysis(n_clicks, results_data, selected_rows, table_data):
+        """Run dose-response EC50 analysis"""
+        # Empty figure
+        fig = go.Figure()
+        fig.update_layout(template='plotly_white')
+
+        if not results_data or not results_data.get('results'):
+            fig.add_annotation(
+                text="No analysis data available",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            return html.Div([
+                dbc.Alert("No data available for analysis.", color="warning")
+            ]), fig
+
+        if not selected_rows or len(selected_rows) < 3:
+            fig.add_annotation(
+                text="Select at least 3 data points to fit dose-response curve",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            return html.Div([
+                dbc.Alert("Please select at least 3 data points with valid concentrations for EC50 fitting.", color="warning")
+            ]), fig
+
+        # Extract selected data
+        # selected_rows contains the row indices directly corresponding to the results array
+        results = results_data['results']
+        concentrations = []
+        tm_values = []
+        names = []
+
+        for row_idx in selected_rows:
+            if row_idx < len(results):
+                r = results[row_idx]
+                conc = r.get('concentration')
+                tm = r.get('tm')
+
+                if conc is not None and tm is not None and np.isfinite(conc) and np.isfinite(tm) and conc > 0:
+                    concentrations.append(conc)
+                    tm_values.append(tm)
+                    names.append(r.get('name', f'Sample {row_idx}'))
+
+        if len(concentrations) < 3:
+            fig.add_annotation(
+                text="Insufficient valid data points (need ≥3 with valid concentration and Tm)",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            return html.Div([
+                dbc.Alert("Insufficient valid data points. Need at least 3 points with valid concentration and Tm.", color="danger")
+            ]), fig
+
+        concentrations = np.array(concentrations)
+        tm_values = np.array(tm_values)
+
+        # Fit 4PL curve
+        fit_result = fit_tm_ec50(concentrations, tm_values)
+
+        if not fit_result['success']:
+            fig.add_annotation(
+                text="EC50 fitting failed - insufficient data or poor fit quality",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            return html.Div([
+                dbc.Alert("EC50 fitting failed. Check data quality and concentration range.", color="danger")
+            ]), fig
+
+        # Create dose-response plot
+        # Data points
+        fig.add_trace(go.Scatter(
+            x=concentrations,
+            y=tm_values,
+            mode='markers',
+            marker=dict(
+                size=10,
+                color='darkblue',
+                line=dict(width=1, color='white')
+            ),
+            name='Data points',
+            text=names,
+            hovertemplate='%{text}<br>Concentration: %{x:.2e} M<br>Tm: %{y:.1f} °C<extra></extra>'
+        ))
+
+        # Fitted curve
+        conc_min = concentrations.min()
+        conc_max = concentrations.max()
+        conc_fit = np.logspace(np.log10(conc_min / 10), np.log10(conc_max * 10), 200)
+        tm_fit = hill4_tm(conc_fit, *fit_result['popt'])
+
+        fig.add_trace(go.Scatter(
+            x=conc_fit,
+            y=tm_fit,
+            mode='lines',
+            line=dict(color='red', width=3),
+            name=f"4PL Fit (R² = {fit_result['r2']:.3f})",
+            hovertemplate='Concentration: %{x:.2e} M<br>Predicted Tm: %{y:.1f} °C<extra></extra>'
+        ))
+
+        # EC50 vertical line
+        ec50 = fit_result['ec50']
+        ec50_tm = hill4_tm(np.array([ec50]), *fit_result['popt'])[0]
+
+        fig.add_trace(go.Scatter(
+            x=[ec50, ec50],
+            y=[tm_values.min() - 2, ec50_tm],
+            mode='lines',
+            line=dict(color='green', width=2, dash='dash'),
+            name=f'EC50 = {ec50:.2e} M',
+            showlegend=True,
+            hovertemplate=f'EC50: {ec50:.2e} M<extra></extra>'
+        ))
+
+        fig.update_layout(
+            xaxis_type='log',
+            xaxis_title='Concentration (M)',
+            yaxis_title='Tm (°C)',
+            title='Dose-Response Curve: Tm vs Concentration',
+            template='plotly_white',
+            hovermode='closest',
+            height=500
+        )
+
+        # Create results display
+        ec50_str = f"{ec50:.2e} M"
+        if ec50 >= 1e-6:
+            ec50_str += f" ({ec50*1e6:.2f} µM)"
+        elif ec50 >= 1e-9:
+            ec50_str += f" ({ec50*1e9:.2f} nM)"
+
+        ci_str = f"{fit_result['ec50_ci'][0]:.2e} - {fit_result['ec50_ci'][1]:.2e} M"
+
+        results_display = html.Div([
+            dbc.Alert("✅ EC50 Analysis Complete", color="success", className="mb-3"),
+
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H6("EC50", className="text-muted mb-1"),
+                            html.H4(ec50_str, className="text-primary mb-0")
+                        ])
+                    ], className="shadow-sm text-center mb-2")
+                ], md=4),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H6("95% CI", className="text-muted mb-1"),
+                            html.H6(ci_str, className="text-success mb-0", style={"fontSize": "14px"})
+                        ])
+                    ], className="shadow-sm text-center mb-2")
+                ], md=4),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H6("R²", className="text-muted mb-1"),
+                            html.H4(f"{fit_result['r2']:.4f}", className="text-info mb-0")
+                        ])
+                    ], className="shadow-sm text-center mb-2")
+                ], md=4),
+            ]),
+
+            html.Hr(),
+
+            html.H6("Fitting Parameters", className="mt-3 mb-2"),
+            dbc.Table([
+                html.Thead([
+                    html.Tr([
+                        html.Th("Parameter"),
+                        html.Th("Value")
+                    ])
+                ]),
+                html.Tbody([
+                    html.Tr([
+                        html.Td("Bottom (Tm0)"),
+                        html.Td(f"{fit_result['bottom']:.2f} °C")
+                    ]),
+                    html.Tr([
+                        html.Td("Top (Tm∞)"),
+                        html.Td(f"{fit_result['top']:.2f} °C")
+                    ]),
+                    html.Tr([
+                        html.Td("Hill Slope"),
+                        html.Td(f"{fit_result['hill_slope']:.3f}")
+                    ]),
+                    html.Tr([
+                        html.Td("Data Points"),
+                        html.Td(f"{len(concentrations)}")
+                    ])
+                ])
+            ], bordered=True, hover=True, size='sm', className="mb-3")
+        ])
+
+        return results_display, fig

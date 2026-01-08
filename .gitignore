@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+.venv312/
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+.claude/
+
+# Logs
+*.log
+*.log.*
+
+# Test data and sample datasets
+SampleDataSets/
+auc_diagnostics/
+
+# Debug files
+debug/
+debug_*.py
+test_*.py
+*_debug.log
+
+# Backup and legacy
+_backup_v1/
+_ul
+
+# Manuscript and presentation files
+*.docx
+*.pptx
+*.pdf
+manuscript/
+
+# Build outputs
+build/
+dist/
+*.spec
+build_*.bat
+hook-*.py
+
+# Performance logs
+performance.log
+server*.log
+callback_debug.log
+fd_debug.log
+
+# Temporary files
+*.tmp
+*.bak
+~$*
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Excel test files
+*.xlsx
+!requirements*.xlsx
+
+# PyInstaller/Nuitka
+*.spec
+build_desktop.bat
+build_nuitka.bat

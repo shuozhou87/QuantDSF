@@ -1,0 +1,33 @@
+# QuantDSF v2 Dependencies
+# ========================
+
+# Core scientific computing
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=2.0.0
+
+# Visualization
+plotly>=5.15.0
+matplotlib>=3.7.0
+
+# Dash framework
+dash>=2.14.0
+dash-bootstrap-components>=1.5.0
+
+# Data modeling
+pydantic>=2.0.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# Excel support
+openpyxl>=3.1.0
+
+# Development
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Optional: for faster CSV parsing
+# pyarrow>=12.0.0
+
+
