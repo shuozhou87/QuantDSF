@@ -427,6 +427,8 @@ def register_analysis_callbacks(app: Dash) -> None:
                     # 更新新结果中的浓度和样本名称(如果之前有手动编辑过)
                     for result in all_results:
                         # 使用当前的name(清理后的文件名)作为原始名称
+                        # 由于clean_sample_name()已经移除了频道信息,
+                        # 不同频道的样本会有相同的清理后名称,可以直接匹配
                         original_name = result['name']
 
                         if original_name in prev_data_map:

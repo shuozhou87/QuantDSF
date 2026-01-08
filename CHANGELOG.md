@@ -32,6 +32,13 @@
 - 扩展了表格编辑 callback 以同时处理样本名称和浓度编辑
 - 改进了重新分析时的数据保留逻辑,现在同时保留自定义样本名称和浓度
 
+### Fixed
+- **修复频道切换时数据保留问题**: 改进样本名称清理逻辑以正确处理 ratio 频道
+  - 添加对 "350/330 nm ratio" 等复合波长标记的支持
+  - 确保切换频道(330nm ↔ 350nm ↔ ratio)时用户编辑的样本名称和浓度正确保留
+  - 简化匹配逻辑,依赖改进的 `clean_sample_name()` 函数
+  - 实现位置: `core/utils/parser.py:clean_sample_name()`, `app/callbacks/analysis_callbacks.py`
+
 ---
 
 ## [2.0.0-alpha] - 2025-12-11
