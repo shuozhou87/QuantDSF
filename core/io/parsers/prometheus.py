@@ -13,6 +13,7 @@ import io
 import pandas as pd
 import numpy as np
 from typing import Tuple, Union
+from core.utils.parser import clean_sample_name
 
 
 def parse_prometheus_csv(
@@ -39,10 +40,11 @@ def parse_prometheus_csv(
     # 提取温度和荧光数据
     T = df['T[°C]'].values
     F = df[df.columns[1]].values  # 第二列
-    
-    # 从文件名提取毛细管 ID
-    capillary_id = os.path.splitext(os.path.basename(file_path))[0]
-    
+
+    # 从文件名提取毛细管 ID，并清理样本名称
+    raw_filename = os.path.splitext(os.path.basename(file_path))[0]
+    capillary_id = clean_sample_name(raw_filename)
+
     return T, F, capillary_id
 
 

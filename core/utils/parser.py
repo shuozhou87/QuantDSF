@@ -229,16 +229,16 @@ def parse_all_concentrations(filename: str) -> List[float]:
 def format_concentration(conc: float) -> str:
     """
     将浓度值格式化为人类可读的字符串
-    
+
     Args:
         conc: 浓度值（摩尔）
-    
+
     Returns:
         格式化的字符串，如 "1.5 µM", "25 nM"
     """
     if conc is None:
         return "N/A"
-    
+
     if conc >= 1e-3:
         return f"{conc * 1e3:.2f} mM"
     elif conc >= 1e-6:
@@ -249,4 +249,81 @@ def format_concentration(conc: float) -> str:
         return f"{conc * 1e12:.2f} pM"
     else:
         return f"{conc:.2e} M"
+
+
+def clean_sample_name(filename: str) -> str:
+    """
+    清理样本名称，移除冗余的文件名信息
+
+    从文件名中移除：
+    - 浓度信息（已在 Concentration 列显示）
+    - 占位浓度 "_0_"
+    - 波长标记（"_330 nm", "_350 nm", "_ratio"）
+    - 文件类型标记（"_unfolding", "_raw", "_processed"）
+    - 文件扩展名
+
+    例如：
+    "XBB_1.25E-5_0_330 nm_unfolding_raw" -> "XBB"
+    "TNFa_1uM_350nm_processed" -> "TNFa"
+    "Sample1_2.5E-6_ratio_raw" -> "Sample1"
+
+    Args:
+        filename: 原始文件名
+
+    Returns:
+        清理后的样本名称
+    """
+    if not filename:
+        return filename
+
+    # 移除文件扩展名
+    name = filename
+    for ext in ['.csv', '.txt', '.xlsx', '.xls']:
+        if name.lower().endswith(ext):
+            name = name[:-len(ext)]
+            break
+
+    # 定义需要移除的模式（按顺序）
+    patterns_to_remove = [
+        # 波长标记 (先处理这些，因为它们更具体)
+        r'[_\-\s]*330\s*nm[_\-\s]*',
+        r'[_\-\s]*350\s*nm[_\-\s]*',
+        r'[_\-\s]*ratio[_\-\s]*',
+        # 浓度模式（科学计数法）
+        r'[_\-\s]*\d+\.?\d*[eE][+-]?\d+[_\-\s]*',
+        # 浓度模式（带单位）
+        r'[_\-\s]*\d+\.?\d*\s*[fFpPnNuUµμmM]?[mM][_\-\s]*',
+        # 占位浓度 "_0_" 或类似模式
+        r'[_\-\s]+0[_\-\s]+',
+        # 移除独立的小数浓度值（如 "_0.05_"）
+        r'[_\-\s]+\d*\.\d+[_\-\s]+',
+        # 文件类型标记 (注意前后都可能有分隔符)
+        r'[_\-\s]*unfolding[_\-\s]*',
+        r'[_\-\s]*raw[_\-\s]*',
+        r'[_\-\s]*processed[_\-\s]*',
+        r'[_\-\s]*smoothed[_\-\s]*',
+        r'[_\-\s]*derivative[_\-\s]*',
+        r'[_\-\s]*firstderivative[_\-\s]*',
+    ]
+
+    # 应用所有移除模式（多次迭代确保彻底清理）
+    for _ in range(2):  # 运行两次以处理嵌套模式
+        for pattern in patterns_to_remove:
+            name = re.sub(pattern, '_', name, flags=re.IGNORECASE)
+
+    # 清理多余的分隔符
+    # 移除开头和结尾的分隔符
+    name = name.strip('_- ')
+
+    # 将多个连续分隔符替换为单个下划线
+    name = re.sub(r'[_\-\s]+', '_', name)
+
+    # 再次清理边缘
+    name = name.strip('_- ')
+
+    # 如果清理后为空，返回原始文件名
+    if not name:
+        return filename
+
+    return name
 

@@ -106,14 +106,20 @@ Then open your browser to `http://localhost:8050`
 
 ## Documentation
 
-Comprehensive documentation is available in the `docs/` directory:
+Comprehensive documentation is available in the `docs/` directory.
 
-- [Architecture Proposal](docs/V2_ARCHITECTURE_PROPOSAL.md)
-- [Multicore Parallelization](docs/MULTICORE_PARALLELIZATION.md)
-- [Single-Curve Thermodynamics](docs/SINGLE_CURVE_THERMODYNAMICS.md)
-- [Desktop Packaging Guide](docs/DESKTOP_PACKAGING_STATUS.md)
-- [Nuitka Build Guide](docs/NUITKA_BUILD_GUIDE.md)
-- [Why QuantDSF?](docs/WHY_QUANTDSF.md)
+### Quick Links
+- **[Documentation Index](docs/README.md)** - Complete documentation navigation
+- **[CHANGELOG.md](CHANGELOG.md)** - Version history and updates
+- **[Why QuantDSF?](docs/WHY_QUANTDSF.md)** - Project motivation
+
+### Key Documents
+- [Architecture Proposal](docs/V2_ARCHITECTURE_PROPOSAL.md) - System design
+- [Multicore Parallelization](docs/MULTICORE_PARALLELIZATION.md) - Performance optimization
+- [Single-Curve Thermodynamics](docs/SINGLE_CURVE_THERMODYNAMICS.md) - Core innovation
+- [Desktop App Guide](docs/DESKTOP_APP_GUIDE.md) - Desktop application usage
+- [Nuitka Build Guide](docs/NUITKA_BUILD_GUIDE.md) - Building executables
+- [Developer Guide](docs/DEVELOPER_GUIDE.md) - Contributing to the project
 
 ## Technical Highlights
 

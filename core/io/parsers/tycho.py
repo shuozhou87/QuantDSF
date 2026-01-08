@@ -14,6 +14,7 @@ import re
 import pandas as pd
 import numpy as np
 from typing import Tuple, List, Union, Optional, Dict
+from core.utils.parser import clean_sample_name
 
 
 def parse_tycho_nt6_csv(
@@ -63,9 +64,10 @@ def parse_tycho_nt6_csv(
             valid_mask = ~(np.isnan(T) | np.isnan(F))
             T = T[valid_mask]
             F = F[valid_mask]
-            
+
             if len(T) >= 10 and len(F) >= 10:
-                capillary_id = os.path.splitext(os.path.basename(file_path))[0]
+                raw_filename = os.path.splitext(os.path.basename(file_path))[0]
+                capillary_id = clean_sample_name(raw_filename)
                 return T, F, capillary_id
                 
         except Exception:
@@ -169,8 +171,10 @@ def parse_tycho_nt6_excel(
                 if len(T_clean) >= 10:
                     cap_label = capillary_labels.get(cap_num, f"Cap{cap_num}")
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
-                    capillary_id = f"{base_name}_{cap_label}_{channel_info['channel_name']}"
-                    
+                    # 构建完整的 capillary_id 然后清理
+                    full_name = f"{base_name}_{cap_label}_{channel_info['channel_name']}"
+                    capillary_id = clean_sample_name(full_name)
+
                     results.append((T_clean, F_clean, capillary_id))
                     
     except Exception as e:
