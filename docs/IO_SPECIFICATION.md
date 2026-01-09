@@ -11,7 +11,6 @@
 1. [Input Specifications](#input-specifications)
 2. [Output Specifications](#output-specifications)
 3. [Error Messages](#error-messages)
-4. [Data Quality Standards](#data-quality-standards)
 
 ---
 
@@ -427,70 +426,6 @@ Please try:
 
 ---
 
-## Data Quality Standards
-
-### 4.1 Acceptance Criteria
-
-#### **Minimum Requirements**
-| Parameter | Threshold | Rationale |
-|-----------|-----------|-----------|
-| Data points | ≥ 10 | Statistical significance |
-| Temperature range | ≥ 20°C | Capture full transition |
-| R² (TSB/AUC) | ≥ 0.90 | Good fit quality |
-| SNR (FD) | ≥ 3.0 | Clear peak detection |
-
-#### **Quality Tiers**
-
-**High Quality** (✅):
-- R² ≥ 0.95 (TSB/AUC) or SNR ≥ 5.0 (FD)
-- Clear melting transition
-- Stable baselines
-
-**Acceptable Quality** (⚠️):
-- 0.80 ≤ R² < 0.95 (TSB/AUC) or 3.0 ≤ SNR < 5.0 (FD)
-- Usable for screening
-- May require manual verification
-
-**Poor Quality** (❌):
-- R² < 0.80 (TSB/AUC) or SNR < 3.0 (FD)
-- Fitting failed
-- Tm not detectable
-
----
-
-### 4.2 Recommended Experimental Design
-
-#### **For Tm Determination**
-- **Temperature range**: 20-95°C (minimum)
-- **Step size**: 1°C or finer
-- **Channel**: 350/330 nm ratio (default)
-- **Replicates**: ≥ 3 per condition
-
-#### **For Thermodynamic Analysis (Van't Hoff)**
-- **Concentration points**: ≥ 5 (recommended), ≥ 3 (minimum)
-- **Concentration range**: 2-3 orders of magnitude
-- **Spacing**: Log-scale (e.g., 0.1, 0.3, 1, 3, 10 µM)
-- **Replicates**: ≥ 2 per concentration
-
-#### **For Dose-Response**
-- **Concentration points**: ≥ 8
-- **Range**: Cover EC₅₀ ± 2 log units
-- **Controls**: Include apo (0 M) and saturating ligand
-
----
-
-### 4.3 Troubleshooting Guide
-
-| Issue | Possible Cause | Solution |
-|-------|---------------|----------|
-| Low R² (TSB) | - Noisy data<br>- Multiple transitions | - Increase smoothing<br>- Use AUC method |
-| Low SNR (FD) | - Weak signal<br>- Flat melting curve | - Use TSB/AUC method<br>- Check protein stability |
-| No Tm detected | - No melting transition<br>- T range too narrow | - Extend temperature range<br>- Check protein folding |
-| Scattered Tm values | - Sample heterogeneity<br>- Aggregation | - Check sample prep<br>- Filter/centrifuge |
-| Concentration not detected | - Non-standard naming | - Use format: `10uM`, `100nM` in filename |
-
----
-
 ## Appendix
 
 ### A1. Analysis Methods
@@ -526,7 +461,12 @@ Please try:
 
 ---
 
-### A3. Contact & Support
+### A3. Related Documentation
+
+- **[QUALITY_CONTROL.md](QUALITY_CONTROL.md)** - Comprehensive data quality assessment guide
+- **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** - Implementation details for developers
+
+### A4. Contact & Support
 
 For questions or issues:
 - **GitHub Issues**: [https://github.com/shuozhou87/QuantDSF/issues](https://github.com/shuozhou87/QuantDSF/issues)

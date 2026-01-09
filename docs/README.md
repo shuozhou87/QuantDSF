@@ -26,7 +26,11 @@
   - 支持的文件格式
   - 输出格式规范
   - 错误消息定义
-  - 数据质量标准
+- [QUALITY_CONTROL.md](QUALITY_CONTROL.md) - 数据质量控制指南 **[重要]**
+  - 质量评估标准
+  - 方法特定的QC指标
+  - 实验设计建议
+  - 故障排除指南
 - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) - 开发者指南
   - 代码规范
   - 项目结构
