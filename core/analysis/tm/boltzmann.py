@@ -279,20 +279,56 @@ def _fit_exponential_model(
     rss = np.sum(residuals**2)
     degrees_freedom = len(T) - len(popt)
     sigma_resid = np.sqrt(rss / degrees_freedom) if degrees_freedom > 0 else np.nan
-    
+
     F_N_at_Tm = A_N * np.exp(alpha * Tm) + D_N
     F_D_at_Tm = A_D * np.exp(beta * Tm) + D_D
     deltaF = abs(F_D_at_Tm - F_N_at_Tm)
     state_snr = deltaF / sigma_resid if sigma_resid > 0 else np.nan
-    
+
+    # 计算 ΔAIC (AIC_linear - AIC_TSB)
+    # Linear model: 3-parameter (pre-slope, post-slope, Tm)
+    n = len(T)
+    idx_pre = T < (Tm - 5)
+    idx_post = T > (Tm + 5)
+
+    if np.sum(idx_pre) > 2 and np.sum(idx_post) > 2:
+        # Fit linear baselines before and after Tm
+        p_pre = np.polyfit(T[idx_pre], F[idx_pre], 1)
+        F_pre = np.polyval(p_pre, T)
+
+        p_post = np.polyfit(T[idx_post], F[idx_post], 1)
+        F_post = np.polyval(p_post, T)
+
+        # Linear model: step function at Tm
+        F_linear = np.where(T < Tm, F_pre, F_post)
+        RSS_linear = np.sum((F - F_linear)**2)
+    else:
+        # Fallback: simple linear fit
+        p = np.polyfit(T, F, 1)
+        F_linear = np.polyval(p, T)
+        RSS_linear = np.sum((F - F_linear)**2)
+
+    # Calculate AIC
+    RSS_tsb = rss
+    if RSS_linear > 0 and RSS_tsb > 0:
+        AIC_linear = n * np.log(RSS_linear / n) + 2 * 3
+        AIC_tsb = n * np.log(RSS_tsb / n) + 2 * 8
+        delta_aic = AIC_linear - AIC_tsb
+        log_delta_aic = np.log10(delta_aic) if delta_aic > 0 else 0.0
+    else:
+        delta_aic = 0.0
+        log_delta_aic = 0.0
+
     param_std = np.sqrt(np.diag(pcov))
-    
+
     return {
         'success': True,
         'Tm': Tm,
         'Tm_std': param_std[6],
         'R_squared': r_squared,
         'state_snr': state_snr,
+        'delta_aic': delta_aic,
+        'log_delta_aic': log_delta_aic,
         'steepness': k,
         'steepness_std': param_std[7],
         'parameters': {
