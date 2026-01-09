@@ -146,6 +146,80 @@ def calculate_delta_aic(
     return delta_aic, log_delta_aic
 
 
+def calculate_delta_bic(
+    T: np.ndarray,
+    F: np.ndarray,
+    Tm_linear: float,
+    popt_tsb: np.ndarray,
+    F_fit_tsb: np.ndarray
+) -> Tuple[float, float]:
+    """
+    计算Linear模型和TSB模型之间的ΔBIC
+
+    ΔBIC = BIC_linear - BIC_TSB
+
+    A positive ΔBIC means TSB is preferred over the linear model.
+    log₁₀(ΔBIC) is returned for easier interpretation.
+
+    BIC has a stronger penalty for model complexity than AIC.
+
+    Args:
+        T: Temperature array
+        F: Observed fluorescence
+        Tm_linear: Tm from linear interpolation (used for baseline fitting)
+        popt_tsb: TSB fitted parameters
+        F_fit_tsb: TSB fitted fluorescence
+
+    Returns:
+        delta_bic: float, ΔBIC value
+        log_delta_bic: float, log₁₀(ΔBIC) for interpretation
+    """
+    n = len(F)
+
+    # ========== Linear Model (3 parameters) ==========
+    idx_pre = T < (Tm_linear - 5)
+    idx_post = T > (Tm_linear + 5)
+
+    if np.sum(idx_pre) > 2 and np.sum(idx_post) > 2:
+        p_pre = np.polyfit(T[idx_pre], F[idx_pre], 1)
+        F_pre = np.polyval(p_pre, T)
+
+        p_post = np.polyfit(T[idx_post], F[idx_post], 1)
+        F_post = np.polyval(p_post, T)
+
+        F_linear = np.where(T < Tm_linear, F_pre, F_post)
+    else:
+        p = np.polyfit(T, F, 1)
+        F_linear = np.polyval(p, T)
+
+    RSS_linear = np.sum((F - F_linear)**2)
+
+    # ========== TSB Model (8 parameters) ==========
+    RSS_tsb = np.sum((F - F_fit_tsb)**2)
+
+    # ========== Calculate BIC ==========
+    # BIC = n·ln(RSS/n) + k·ln(n)
+    # where k is the number of parameters
+
+    # Avoid log(0) or log(negative)
+    if RSS_linear <= 0 or RSS_tsb <= 0:
+        return 0.0, 0.0
+
+    BIC_linear = n * np.log(RSS_linear / n) + 3 * np.log(n)
+    BIC_tsb = n * np.log(RSS_tsb / n) + 8 * np.log(n)
+
+    delta_bic = BIC_linear - BIC_tsb
+
+    # log₁₀(ΔBIC) for interpretation
+    if delta_bic > 0:
+        log_delta_bic = np.log10(delta_bic)
+    else:
+        # TSB is worse than linear (should rarely happen)
+        log_delta_bic = 0.0
+
+    return delta_bic, log_delta_bic
+
+
 def calculate_baseline_snr(
     F: np.ndarray,
     baseline_region: int = 10

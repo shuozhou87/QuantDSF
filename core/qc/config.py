@@ -43,79 +43,84 @@ class QCSettings(BaseModel):
 
     tm_state_snr_excellent: float = Field(
         10.0,
-        description="State SNR 优秀阈值"
-    )
-
-    tm_state_snr_good: float = Field(
-        5.0,
-        description="State SNR 良好阈值"
+        description="State SNR 优秀阈值 (≥10绿标)"
     )
 
     tm_state_snr_marginal: float = Field(
         3.0,
-        description="State SNR 可接受阈值"
+        description="State SNR 可接受阈值 (3-10黄标, <3红标)"
     )
 
     tm_delta_aic_strong: float = Field(
         2.0,
-        description="ΔAIC 强烈支持TSB阈值"
+        description="ΔAIC 强烈支持TSB阈值 (log10 scale)"
     )
 
     tm_delta_aic_preferred: float = Field(
         1.0,
-        description="ΔAIC 支持TSB阈值"
+        description="ΔAIC 支持TSB阈值 (log10 scale)"
     )
 
     tm_delta_aic_marginal: float = Field(
         0.5,
-        description="ΔAIC 轻微支持TSB阈值"
+        description="ΔAIC 轻微支持TSB阈值 (log10 scale)"
+    )
+
+    tm_delta_bic_strong: float = Field(
+        2.0,
+        description="ΔBIC 强烈支持TSB阈值 (log10 scale)"
+    )
+
+    tm_delta_bic_preferred: float = Field(
+        1.0,
+        description="ΔBIC 支持TSB阈值 (log10 scale)"
+    )
+
+    tm_delta_bic_marginal: float = Field(
+        0.5,
+        description="ΔBIC 轻微支持TSB阈值 (log10 scale)"
     )
 
     tm_error_excellent: float = Field(
-        0.5,
+        0.3,
         description="Tm误差 优秀阈值 (°C)"
     )
 
     tm_error_good: float = Field(
-        1.0,
+        0.5,
         description="Tm误差 良好阈值 (°C)"
     )
 
     tm_error_marginal: float = Field(
-        2.0,
+        1.0,
         description="Tm误差 可接受阈值 (°C)"
     )
 
     # AUC thresholds (same as TSB for R²)
     auc_dynamic_range_excellent: float = Field(
-        80.0,
-        description="AUC动态范围 优秀阈值 (%)"
+        60.0,
+        description="AUC动态范围 优秀阈值 (≥60%绿标)"
     )
 
     auc_dynamic_range_good: float = Field(
-        60.0,
-        description="AUC动态范围 良好阈值 (%)"
+        30.0,
+        description="AUC动态范围 良好阈值 (30-60%黄标)"
     )
 
     auc_dynamic_range_marginal: float = Field(
-        40.0,
-        description="AUC动态范围 可接受阈值 (%)"
+        30.0,
+        description="AUC动态范围 可接受阈值 (<30%红标)"
     )
 
     # FD thresholds
     fd_peak_snr_excellent: float = Field(
-        5.0,
-        description="FD Peak SNR 优秀阈值"
-    )
-
-    fd_peak_snr_good: float = Field(
-        3.0,
-        description="FD Peak SNR 良好阈值"
+        10.0,
+        description="FD Peak SNR 优秀阈值 (≥10绿标)"
     )
 
     fd_peak_snr_marginal: float = Field(
-        2.0,
-        description="FD Peak SNR 可接受阈值"
+        3.0,
+        description="FD Peak SNR 可接受阈值 (3-10黄标, <3红标)"
     )
 
     # ==================== Tab 2: Thermodynamic QC ====================
@@ -140,19 +145,24 @@ class QCSettings(BaseModel):
         description="Van't Hoff 优秀数据点数"
     )
 
+    thermo_min_points_good: int = Field(
+        4,
+        description="Van't Hoff 良好数据点数"
+    )
+
     thermo_min_points_acceptable: int = Field(
         3,
         description="Van't Hoff 可接受数据点数"
     )
 
-    thermo_min_temp_range_good: float = Field(
+    thermo_min_delta_T_excellent: float = Field(
         15.0,
-        description="Van't Hoff 良好温度范围 (K)"
+        description="Van't Hoff 优秀温度范围 (K)"
     )
 
-    thermo_min_temp_range_marginal: float = Field(
+    thermo_min_delta_T_good: float = Field(
         10.0,
-        description="Van't Hoff 可接受温度范围 (K)"
+        description="Van't Hoff 良好温度范围 (K)"
     )
 
     thermo_delta_h_min: float = Field(
@@ -194,17 +204,32 @@ class QCSettings(BaseModel):
 
     dr_dynamic_range_excellent: float = Field(
         60.0,
-        description="4PL 动态范围 优秀阈值 (%)"
+        description="4PL 动态范围 优秀阈值 (≥60%绿标)"
     )
 
     dr_dynamic_range_good: float = Field(
-        40.0,
-        description="4PL 动态范围 良好阈值 (%)"
+        30.0,
+        description="4PL 动态范围 良好阈值 (30-60%黄标)"
     )
 
     dr_dynamic_range_marginal: float = Field(
-        20.0,
-        description="4PL 动态范围 可接受阈值 (%)"
+        30.0,
+        description="4PL 动态范围 可接受阈值 (<30%红标)"
+    )
+
+    dr_data_coverage_excellent: float = Field(
+        60.0,
+        description="实际数据覆盖范围 优秀阈值 (≥60%绿标)"
+    )
+
+    dr_data_coverage_good: float = Field(
+        30.0,
+        description="实际数据覆盖范围 良好阈值 (30-60%黄标)"
+    )
+
+    dr_data_coverage_marginal: float = Field(
+        30.0,
+        description="实际数据覆盖范围 可接受阈值 (<30%红标)"
     )
 
     dr_hill_slope_min_normal: float = Field(

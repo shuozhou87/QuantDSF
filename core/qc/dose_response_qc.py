@@ -97,9 +97,21 @@ class DoseResponseQualityController(QualityController):
         EC50 = dr_result.get('EC50')
         EC50_err = dr_result.get('EC50_err')
 
-        # Calculate dynamic range
+        # Calculate dynamic range (理论范围: top vs bottom)
         dynamic_range = abs(top - bottom)
         dynamic_range_pct = (dynamic_range / max(abs(top), abs(bottom))) * 100.0 if max(abs(top), abs(bottom)) > 0 else 0.0
+
+        # Calculate data coverage (实际数据覆盖的动态范围)
+        # 使用实际数据的min/max计算
+        responses = dr_result.get('responses', [])
+        if responses and len(responses) > 0:
+            response_array = np.array(responses)
+            data_min = response_array.min()
+            data_max = response_array.max()
+            data_coverage = abs(data_max - data_min)
+            data_coverage_pct = (data_coverage / max(abs(top), abs(bottom))) * 100.0 if max(abs(top), abs(bottom)) > 0 else 0.0
+        else:
+            data_coverage_pct = 0.0
 
         # Calculate EC50 relative error
         EC50_rel_err = abs(EC50_err / EC50) if EC50 is not None and EC50 > 0 and EC50_err is not None else float('inf')
@@ -131,6 +143,7 @@ class DoseResponseQualityController(QualityController):
             'top': top,
             'dynamic_range': dynamic_range,
             'dynamic_range_pct': dynamic_range_pct,
+            'data_coverage_pct': data_coverage_pct,  # 实际数据覆盖范围
             'hill_slope': hill_slope,
             'hill_plausible': hill_plausible,
 

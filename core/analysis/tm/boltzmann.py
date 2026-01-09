@@ -308,16 +308,25 @@ def _fit_exponential_model(
         F_linear = np.polyval(p, T)
         RSS_linear = np.sum((F - F_linear)**2)
 
-    # Calculate AIC
+    # Calculate AIC and BIC
     RSS_tsb = rss
     if RSS_linear > 0 and RSS_tsb > 0:
+        # AIC = n·ln(RSS/n) + 2·k
         AIC_linear = n * np.log(RSS_linear / n) + 2 * 3
         AIC_tsb = n * np.log(RSS_tsb / n) + 2 * 8
         delta_aic = AIC_linear - AIC_tsb
         log_delta_aic = np.log10(delta_aic) if delta_aic > 0 else 0.0
+
+        # BIC = n·ln(RSS/n) + k·ln(n)
+        BIC_linear = n * np.log(RSS_linear / n) + 3 * np.log(n)
+        BIC_tsb = n * np.log(RSS_tsb / n) + 8 * np.log(n)
+        delta_bic = BIC_linear - BIC_tsb
+        log_delta_bic = np.log10(delta_bic) if delta_bic > 0 else 0.0
     else:
         delta_aic = 0.0
         log_delta_aic = 0.0
+        delta_bic = 0.0
+        log_delta_bic = 0.0
 
     param_std = np.sqrt(np.diag(pcov))
 
@@ -329,6 +338,8 @@ def _fit_exponential_model(
         'state_snr': state_snr,
         'delta_aic': delta_aic,
         'log_delta_aic': log_delta_aic,
+        'delta_bic': delta_bic,
+        'log_delta_bic': log_delta_bic,
         'steepness': k,
         'steepness_std': param_std[7],
         'parameters': {
