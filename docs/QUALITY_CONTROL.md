@@ -1,597 +1,1088 @@
-# QuantDSF Quality Control Guide
+# QuantDSF Quality Control Specification
 
-**Version**: 2.0
+**Version**: 2.1
 **Last Updated**: 2026-01-09
-**Status**: Production
+**Status**: Production - Implementation Required
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Quality Metrics](#quality-metrics)
-3. [Quality Assessment Criteria](#quality-assessment-criteria)
-4. [Quality Flags and Interpretation](#quality-flags-and-interpretation)
-5. [Method-Specific Quality Control](#method-specific-quality-control)
-6. [Experimental Design Guidelines](#experimental-design-guidelines)
-7. [Troubleshooting Guide](#troubleshooting-guide)
-8. [Best Practices](#best-practices)
+2. [QC Module Architecture](#qc-module-architecture)
+3. [Tab 1: Basic Analysis QC](#tab-1-basic-analysis-qc)
+4. [Tab 2: Thermodynamic Analysis QC](#tab-2-thermodynamic-analysis-qc)
+5. [Tab 3: Dose-Response QC](#tab-3-dose-response-qc)
+6. [Quality Flags System](#quality-flags-system)
+7. [Implementation Guidelines](#implementation-guidelines)
+8. [Experimental Design Guidelines](#experimental-design-guidelines)
+9. [Troubleshooting Guide](#troubleshooting-guide)
 
 ---
 
 ## Overview
 
-QuantDSF implements comprehensive quality control (QC) mechanisms to ensure reliable thermal stability analysis. The QC system evaluates multiple parameters and provides clear visual indicators to help users identify high-quality data and flag problematic samples.
+QuantDSF implements tab-specific quality control systems to ensure reliable analysis at each stage:
+
+- **Tab 1 (Basic Analysis)**: Per-capillary Tm determination quality
+- **Tab 2 (Thermodynamics)**: Van't Hoff regression and thermodynamic parameter reliability
+- **Tab 3 (Dose-Response)**: 4PL fitting quality for EC₅₀ determination
 
 ### Design Philosophy
 
-1. **Automated Assessment**: All quality metrics are calculated automatically
-2. **Clear Visual Indicators**: Three-tier system (✅ ⚠️ ❌) for immediate interpretation
-3. **Transparent Reporting**: Users can inspect all quality parameters
-4. **Method-Specific**: Different QC criteria for TSB, AUC, and FD methods
+1. **Modular Architecture**: QC logic separated from analysis code
+2. **Tab-Specific Metrics**: Each tab has appropriate QC criteria
+3. **Automated Assessment**: All metrics calculated automatically
+4. **Transparent Reporting**: Users see all quality parameters
+5. **Three-Tier System**: ✅ Pass, ⚠️ Warning, ❌ Fail
 
 ---
 
-## Quality Metrics
+## QC Module Architecture
 
-### 2.1 Universal Metrics (All Methods)
+### 2.1 Module Structure
 
-#### **Data Completeness**
-
-| Metric | Minimum Threshold | Description |
-|--------|------------------|-------------|
-| **Valid Data Points** | ≥ 10 | Number of (T, F) pairs with no NaN/Inf |
-| **Temperature Range** | ≥ 20°C | Span from T_min to T_max |
-| **Temperature Coverage** | 20-95°C (recommended) | Capture full protein unfolding |
-
-**Why it matters**:
-- < 10 points: Insufficient for statistical fitting
-- Narrow range: May miss Tm if outside measurement window
-- Sparse sampling: Poor resolution of melting transition
-
----
-
-### 2.2 Two-State Boltzmann (TSB) Metrics
-
-#### **Goodness of Fit: R²**
-
-**Definition**: Coefficient of determination
 ```
+core/
+└── qc/
+    ├── __init__.py
+    ├── base.py              # Base QC classes
+    ├── tm_qc.py             # Tab 1: Tm quality control
+    ├── thermo_qc.py         # Tab 2: Thermodynamic QC
+    ├── dose_response_qc.py  # Tab 3: Dose-response QC
+    └── metrics.py           # Common QC metrics
+```
+
+### 2.2 Base QC Interface
+
+```python
+class QualityCheck(BaseModel):
+    """Base quality check result"""
+    passed: bool
+    flag: Literal['✅', '⚠️', '❌']
+    score: float  # 0-100
+    message: str
+    details: Dict[str, Any]
+
+class QualityController(ABC):
+    """Abstract base for QC modules"""
+
+    @abstractmethod
+    def evaluate(self, data: Any) -> QualityCheck:
+        """Evaluate quality and return result"""
+        pass
+
+    @abstractmethod
+    def get_metrics(self, data: Any) -> Dict[str, float]:
+        """Calculate all QC metrics"""
+        pass
+```
+
+### 2.3 Design Principles
+
+**Separation of Concerns**:
+- Analysis code: Focused on calculation (Tm, thermodynamics, fitting)
+- QC code: Focused on quality assessment
+- UI code: Displays QC results
+
+**Centralized Logic**:
+- All QC thresholds defined in one place
+- Consistent flag assignment across tabs
+- Easy to update criteria globally
+
+**Extensibility**:
+- New QC metrics can be added without modifying analysis code
+- Tab-specific QC inherits from base class
+- Configurable thresholds via settings
+
+---
+
+## Tab 1: Basic Analysis QC
+
+### 3.1 Overview
+
+Tab 1 QC evaluates the quality of individual Tm measurements for each capillary, regardless of analysis method (TSB, AUC, FD).
+
+### 3.2 Quality Metrics
+
+#### **A. Universal Metrics (All Methods)**
+
+##### **Data Completeness**
+
+| Metric | Threshold | Flag if Failed |
+|--------|-----------|----------------|
+| Valid Data Points | ≥ 10 | ❌ |
+| Temperature Range | ≥ 20°C | ⚠️ |
+| Non-NaN Ratio | ≥ 95% | ⚠️ |
+
+**Implementation**:
+```python
+def check_data_completeness(T, F):
+    n_valid = np.sum(~np.isnan(T) & ~np.isnan(F))
+    t_range = np.ptp(T)
+    nan_ratio = np.sum(np.isnan(F)) / len(F)
+
+    return {
+        'n_valid': n_valid,
+        't_range': t_range,
+        'nan_ratio': nan_ratio,
+        'passed': n_valid >= 10 and t_range >= 20 and nan_ratio < 0.05
+    }
+```
+
+---
+
+##### **Signal Quality**
+
+| Metric | Threshold | Flag if Failed |
+|--------|-----------|----------------|
+| Dynamic Range | > 5% of max(F) | ⚠️ |
+| Baseline SNR | ≥ 5.0 | ⚠️ |
+
+**Dynamic Range**: `ΔF = max(F) - min(F)`
+
+**Baseline SNR**: Ratio of signal to baseline noise
+```
+SNR_baseline = (max(F) - min(F)) / std(F[:baseline_region])
+```
+
+---
+
+#### **B. TSB-Specific Metrics**
+
+##### **B1. Goodness of Fit: R²**
+
+| Quality Tier | R² Range | Flag |
+|--------------|----------|------|
+| Excellent | ≥ 0.95 | ✅ |
+| Good | 0.90 - 0.95 | ✅ |
+| Marginal | 0.80 - 0.90 | ⚠️ |
+| Poor | < 0.80 | ❌ |
+
+**Calculation**:
+```
+SS_res = Σ(F_obs - F_fit)²
+SS_tot = Σ(F_obs - F_mean)²
+R² = 1 - (SS_res / SS_tot)
+```
+
+---
+
+##### **B2. State SNR** ⭐ **[FROM V1 - NEEDS IMPLEMENTATION]**
+
+**Definition**: Signal-to-noise ratio of the two-state transition
+
+```
+State SNR = |F_D(Tm) - F_N(Tm)| / σ_residual
+```
+
+Where:
+- `F_N(Tm) = A_N·exp(α·Tm) + D_N` (native state fluorescence at Tm)
+- `F_D(Tm) = A_D·exp(β·Tm) + D_D` (denatured state fluorescence at Tm)
+- `σ_residual = sqrt(RSS / df)` (residual standard error)
+
+| Quality Tier | State SNR | Interpretation |
+|--------------|-----------|----------------|
+| **Excellent** ✅ | ≥ 10.0 | Well-defined transition |
+| **Good** ✅ | 5.0 - 10.0 | Clear transition |
+| **Marginal** ⚠️ | 3.0 - 5.0 | Weak but detectable |
+| **Poor** ❌ | < 3.0 | Poorly defined states |
+
+**Why State SNR matters**:
+- R² only measures overall fit quality
+- State SNR measures how well the two states (N and D) are separated
+- High R² with low State SNR → Good fit but unclear transition
+- Critical for multi-domain proteins
+
+**Example**:
+```python
+def calculate_state_snr(T, F, popt, F_fit):
+    """
+    Calculate state SNR for TSB fit
+
+    Args:
+        T: Temperature array
+        F: Observed fluorescence
+        popt: Fitted parameters [A_N, α, D_N, A_D, β, D_D, Tm, k]
+        F_fit: Fitted fluorescence
+
+    Returns:
+        state_snr: float
+    """
+    A_N, alpha, D_N, A_D, beta, D_D, Tm, k = popt
+
+    # Calculate fluorescence of N and D states at Tm
+    F_N = A_N * np.exp(alpha * Tm) + D_N
+    F_D = A_D * np.exp(beta * Tm) + D_D
+
+    # Calculate residual standard error
+    residuals = F - F_fit
+    rss = np.sum(residuals**2)
+    df = len(F) - len(popt)
+    sigma_residual = np.sqrt(rss / df)
+
+    # State SNR
+    state_snr = abs(F_D - F_N) / sigma_residual
+
+    return state_snr
+```
+
+---
+
+##### **B3. Model Selection: ΔAIC** ⭐ **[FROM V1 - NEEDS IMPLEMENTATION]**
+
+**Definition**: Akaike Information Criterion difference between linear and TSB models
+
+```
+AIC = n·ln(RSS/n) + 2·k
+
+AIC_linear = n·ln(RSS_linear/n) + 2·3   # 3 parameters: slope, intercept, Tm
+AIC_TSB = n·ln(RSS_TSB/n) + 2·8         # 8 parameters
+
+ΔAIC = AIC_linear - AIC_TSB
+log₁₀(ΔAIC) = preferred metric for interpretation
+```
+
+| log₁₀(ΔAIC) | Interpretation | Flag |
+|-------------|----------------|------|
+| ≥ 2.0 | TSB strongly preferred | ✅ |
+| 1.0 - 2.0 | TSB preferred | ✅ |
+| 0.5 - 1.0 | TSB marginally better | ⚠️ |
+| < 0.5 | Linear model sufficient | ⚠️ |
+
+**Why ΔAIC matters**:
+- Balances fit quality with model complexity
+- Detects overfitting (TSB may fit noise)
+- Low ΔAIC → Transition too simple for TSB, use AUC/FD instead
+
+**Implementation**:
+```python
+def calculate_delta_aic(T, F, Tm_linear, popt_tsb, F_fit_tsb):
+    """
+    Calculate ΔAIC between linear and TSB models
+
+    Args:
+        T: Temperature array
+        F: Observed fluorescence
+        Tm_linear: Tm from linear interpolation
+        popt_tsb: TSB fitted parameters
+        F_fit_tsb: TSB fitted fluorescence
+
+    Returns:
+        delta_aic: float
+        log_delta_aic: float (preferred for reporting)
+    """
+    n = len(F)
+
+    # Linear model: 3-parameter (pre-slope, post-slope, Tm)
+    # Fit linear baselines and compute RSS
+    idx_pre = T < Tm_linear - 5
+    idx_post = T > Tm_linear + 5
+
+    if np.sum(idx_pre) > 2 and np.sum(idx_post) > 2:
+        # Fit pre-transition baseline
+        p_pre = np.polyfit(T[idx_pre], F[idx_pre], 1)
+        F_pre = np.polyval(p_pre, T)
+
+        # Fit post-transition baseline
+        p_post = np.polyfit(T[idx_post], F[idx_post], 1)
+        F_post = np.polyval(p_post, T)
+
+        # Linear model: average of two baselines in transition
+        F_linear = np.where(T < Tm_linear, F_pre, F_post)
+        RSS_linear = np.sum((F - F_linear)**2)
+    else:
+        # Fallback: simple linear fit
+        p = np.polyfit(T, F, 1)
+        F_linear = np.polyval(p, T)
+        RSS_linear = np.sum((F - F_linear)**2)
+
+    # TSB model RSS
+    RSS_tsb = np.sum((F - F_fit_tsb)**2)
+
+    # Calculate AIC
+    AIC_linear = n * np.log(RSS_linear / n) + 2 * 3
+    AIC_tsb = n * np.log(RSS_tsb / n) + 2 * 8
+
+    delta_aic = AIC_linear - AIC_tsb
+    log_delta_aic = np.log10(delta_aic) if delta_aic > 0 else 0.0
+
+    return delta_aic, log_delta_aic
+```
+
+---
+
+##### **B4. Tm Uncertainty**
+
+| Tm Error (°C) | Quality | Flag |
+|---------------|---------|------|
+| < 0.5 | Excellent | ✅ |
+| 0.5 - 1.0 | Good | ✅ |
+| 1.0 - 2.0 | Marginal | ⚠️ |
+| > 2.0 | Poor | ❌ |
+
+**Calculation**: Standard error from covariance matrix
+```
+Tm_error = sqrt(pcov[6,6])  # Tm is parameter index 6
+```
+
+---
+
+#### **C. AUC-Specific Metrics**
+
+##### **C1. Hill Fit R²**
+
+Same thresholds as TSB:
+
+| Quality Tier | R² Range | Flag |
+|--------------|----------|------|
+| ≥ 0.95 | Excellent | ✅ |
+| 0.90 - 0.95 | Good | ✅ |
+| 0.80 - 0.90 | Marginal | ⚠️ |
+| < 0.80 | Poor | ❌ |
+
+##### **C2. Dynamic Range**
+
+| Dynamic Range | Quality | Flag |
+|---------------|---------|------|
+| > 80% | Excellent | ✅ |
+| 60-80% | Good | ✅ |
+| 40-60% | Marginal | ⚠️ |
+| < 40% | Poor | ❌ |
+
+**Calculation**:
+```
+Progress curve: P(T) from integration of F(T)
+Dynamic Range = (P_max - P_min) / P_max × 100%
+```
+
+---
+
+#### **D. First Derivative (FD) Specific Metrics**
+
+##### **D1. Peak SNR**
+
+| Peak SNR | Quality | Flag |
+|----------|---------|------|
+| ≥ 5.0 | Excellent | ✅ |
+| 3.0 - 5.0 | Good | ✅ |
+| 2.0 - 3.0 | Marginal | ⚠️ |
+| < 2.0 | Poor | ❌ |
+
+**Calculation**:
+```
+dF/dT = first derivative (Savitzky-Golay smoothed)
+Peak_height = max(dF/dT)
+Baseline_mean = mean(dF/dT[baseline_region])
+Baseline_std = std(dF/dT[baseline_region])
+
+Peak SNR = (Peak_height - Baseline_mean) / Baseline_std
+```
+
+##### **D2. Peak Width**
+
+| Width (°C) | Interpretation | Flag |
+|-----------|----------------|------|
+| 2-5 | Normal cooperativity | ✅ |
+| 5-10 | Lower cooperativity | ✅ |
+| > 10 | Broad transition | ⚠️ |
+| < 2 | Very sharp (may be artifact) | ⚠️ |
+
+**Calculation**: Full width at half maximum (FWHM)
+
+---
+
+### 3.3 Overall Quality Flag (Tab 1)
+
+**Flag Assignment Logic**:
+
+```python
+def assign_tab1_quality_flag(metrics, method):
+    """
+    Assign overall quality flag for Tab 1
+
+    Args:
+        metrics: Dict of all QC metrics
+        method: 'boltzmann', 'auc', or 'derivative'
+
+    Returns:
+        flag: '✅', '⚠️', or '❌'
+    """
+    # Check critical failures
+    if metrics['n_valid'] < 10:
+        return '❌'
+
+    if np.isnan(metrics['tm']):
+        return '❌'
+
+    # Method-specific checks
+    if method == 'boltzmann':
+        if metrics['r_squared'] < 0.80:
+            return '❌'
+        elif metrics['r_squared'] < 0.90:
+            return '⚠️'
+        elif metrics.get('state_snr', float('inf')) < 3.0:
+            return '⚠️'
+        else:
+            return '✅'
+
+    elif method == 'auc':
+        if metrics['r_squared'] < 0.80:
+            return '❌'
+        elif metrics['r_squared'] < 0.90:
+            return '⚠️'
+        else:
+            return '✅'
+
+    elif method == 'derivative':
+        if metrics['peak_snr'] < 2.0:
+            return '❌'
+        elif metrics['peak_snr'] < 3.0:
+            return '⚠️'
+        else:
+            return '✅'
+
+    return '⚠️'  # Default
+```
+
+---
+
+## Tab 2: Thermodynamic Analysis QC
+
+### 4.1 Overview
+
+Tab 2 QC evaluates the reliability of thermodynamic parameters (ΔH, ΔS, KD) derived from Van't Hoff analysis.
+
+### 4.2 Quality Metrics
+
+#### **A. Van't Hoff Regression Quality**
+
+##### **A1. Regression R²**
+
+| R² Range | Quality | Reliability |
+|----------|---------|-------------|
+| ≥ 0.95 | Excellent | HIGH |
+| 0.90 - 0.95 | Good | MEDIUM |
+| 0.85 - 0.90 | Marginal | LOW |
+| < 0.85 | Poor | VERY LOW |
+
+**Calculation**:
+```
+Van't Hoff plot: ln(KD) vs 1/T
+
 R² = 1 - (SS_residual / SS_total)
 ```
 
-| Quality Tier | R² Range | Interpretation |
-|--------------|----------|----------------|
-| **Excellent** ✅ | ≥ 0.95 | High confidence in Tm |
-| **Good** ✅ | 0.90 - 0.95 | Acceptable fit quality |
-| **Marginal** ⚠️ | 0.80 - 0.90 | Use with caution |
-| **Poor** ❌ | < 0.80 | Unreliable Tm |
+---
 
-**What R² measures**:
-- How well the TSB model explains the data
-- Deviation of fitted curve from observed fluorescence
-- Combined effect of noise, baseline drift, and model appropriateness
+##### **A2. Number of Data Points**
 
-**Common causes of low R²**:
-- **High noise**: SNR < 10, random fluctuations
-- **Complex unfolding**: Multi-domain proteins, intermediates
-- **Aggregation**: Non-sigmoidal transitions
-- **Baseline issues**: Drift, photobleaching, bubbles
+| n_points | Quality | Flag |
+|----------|---------|------|
+| ≥ 5 | Excellent | ✅ |
+| 3-4 | Acceptable | ⚠️ |
+| < 3 | Insufficient | ❌ |
+
+**Why it matters**:
+- n < 3: Cannot perform regression
+- n = 3-4: Regression possible but low confidence
+- n ≥ 5: Recommended for reliable ΔH, ΔS
 
 ---
 
-#### **Fit Convergence**
+##### **A3. Temperature Range**
 
-| Status | Meaning | Action |
-|--------|---------|--------|
-| **Converged** | Optimizer found minimum | Report Tm |
-| **Failed** | Max iterations reached | Mark as ❌ |
-| **Poor initial guess** | No convergence | Use multiple initial guesses |
+| ΔT (K) | Quality | Flag |
+|--------|---------|------|
+| ≥ 15 | Good | ✅ |
+| 10-15 | Marginal | ⚠️ |
+| < 10 | Poor | ❌ |
 
----
-
-### 2.3 Area Under Curve (AUC) Metrics
-
-#### **Hill Fit R²**
-
-AUC method fits a Hill equation to the integrated fluorescence (progress curve):
-```
-P(T) = Bottom + (Top - Bottom) / (1 + 10^((T₅₀ - T) × HillSlope))
-```
-
-| Quality Tier | R² Range | Interpretation |
-|--------------|----------|----------------|
-| **Excellent** ✅ | ≥ 0.95 | Robust Tm estimate |
-| **Good** ✅ | 0.90 - 0.95 | Acceptable quality |
-| **Marginal** ⚠️ | 0.80 - 0.90 | Verify visually |
-| **Poor** ❌ | < 0.80 | Unreliable |
-
-**Advantages of AUC**:
-- More robust to noise than TSB
-- Less sensitive to baseline model choice
-- Better for screening applications
-
-**When AUC outperforms TSB**:
-- Noisy data (e.g., low protein concentration)
-- Non-exponential baselines
-- Partial unfolding (incomplete transitions)
+**Why it matters**:
+- Narrow ΔT → High extrapolation error
+- Wide ΔT → Reliable KD prediction at target temperatures
 
 ---
 
-### 2.4 First Derivative (FD) Metrics
+#### **B. Parameter Uncertainty**
 
-#### **Signal-to-Noise Ratio (SNR)**
+##### **B1. ΔH Relative Error**
 
-**Definition**: Peak height relative to baseline noise
+| Relative Error | Quality | Flag |
+|----------------|---------|------|
+| < 10% | Excellent | ✅ |
+| 10-20% | Good | ✅ |
+| 20-30% | Marginal | ⚠️ |
+| > 30% | Poor | ❌ |
+
+**Calculation**:
 ```
-SNR = (Peak_height - Baseline_mean) / Baseline_std
+ΔH_error = sqrt(cov[0,0])  # From regression covariance
+Relative_error = ΔH_error / |ΔH| × 100%
 ```
 
-| Quality Tier | SNR Range | Interpretation |
-|--------------|-----------|----------------|
-| **Excellent** ✅ | ≥ 5.0 | Clear, sharp peak |
-| **Good** ✅ | 3.0 - 5.0 | Detectable peak |
-| **Marginal** ⚠️ | 2.0 - 3.0 | Weak signal |
-| **Poor** ❌ | < 2.0 | Peak not reliable |
+---
 
-**How SNR is calculated**:
-1. Compute first derivative: dF/dT using Savitzky-Golay filter
-2. Identify peak: Maximum of smoothed derivative
-3. Estimate baseline: Mean of derivative outside transition region
-4. Calculate noise: Standard deviation of baseline
-5. SNR = (Peak - Baseline) / Noise
+##### **B2. ΔS Relative Error**
 
-**Factors affecting SNR**:
-- **Signal strength**: Protein concentration, fluorophore content
-- **Noise level**: Instrument precision, buffer conditions
-- **Transition sharpness**: Cooperativity (higher = sharper peak)
-- **Smoothing**: Too much blurs peak, too little amplifies noise
+Same thresholds as ΔH.
 
 ---
 
-#### **Peak Width**
+##### **B3. KD Prediction Reliability**
 
-| Width (°C) | Interpretation | Likely Cause |
-|-----------|----------------|--------------|
-| 2-5°C | Normal cooperativity | Single-domain protein |
-| 5-10°C | Lower cooperativity | Multi-domain or large protein |
-| > 10°C | Broad transition | Aggregation, heterogeneity |
-| < 2°C | Very sharp | Highly cooperative unfolding |
-
-**Note**: Peak width is reported but not used for pass/fail criteria.
-
----
-
-## Quality Assessment Criteria
-
-### 3.1 Three-Tier System
-
-QuantDSF uses a traffic-light system for quality assessment:
-
-#### ✅ **PASS** (High Quality)
-**Criteria**:
-- TSB/AUC: R² ≥ 0.90
-- FD: SNR ≥ 3.0
-- Tm within reasonable range (25-100°C)
-- Fit converged successfully
-
-**Interpretation**: High confidence in reported Tm, suitable for publication and quantitative comparisons.
-
-**Recommended use**:
-- Quantitative thermal stability comparisons
-- Thermodynamic analysis (Van't Hoff, ΔΔG)
-- High-throughput screening hit validation
-
----
-
-#### ⚠️ **WARNING** (Marginal Quality)
-**Criteria**:
-- TSB/AUC: 0.80 ≤ R² < 0.90
-- FD: 2.0 ≤ SNR < 3.0
-- Fit converged but with lower confidence
-- Tm estimate less reliable
-
-**Interpretation**: Data usable for screening but requires caution. Manual inspection recommended.
-
-**Recommended use**:
-- Initial screening (identify trends)
-- Relative comparisons (same-day experiments)
-- Flagged for follow-up validation
-
-**What to check**:
-- Inspect melting curve visually
-- Compare with replicates
-- Consider alternative analysis method
-- Check experimental conditions (pH, buffer, concentration)
-
----
-
-#### ❌ **FAIL** (Poor Quality)
-**Criteria**:
-- TSB/AUC: R² < 0.80
-- FD: SNR < 2.0
-- Fit failed to converge
-- Tm not detected (no peak, no transition)
-- Insufficient data (< 10 points)
-
-**Interpretation**: Tm estimate unreliable or not available. Do not use for quantitative analysis.
-
-**Common causes**:
-- Poor data quality (noise, drift, artifacts)
-- No melting transition in temperature range
-- Sample issues (aggregation, precipitation, air bubbles)
-- Inappropriate analysis method for sample type
-
-**Recommended action**:
-- Repeat experiment with optimized conditions
-- Try different analysis method
-- Check sample preparation
-- Inspect raw data for obvious issues
-
----
-
-### 3.2 Hover Tooltips
-
-To provide transparency, QuantDSF displays detailed quality information on hover:
-
-| Status | Tooltip Content | Example |
-|--------|----------------|---------|
-| ✅ | None (obvious pass) | — |
-| ⚠️ | Specific issue + threshold | "Low R²: 0.856 (threshold: 0.90)" |
-| ❌ | Failure reason | "Analysis failed or Tm not found" |
-
----
-
-## Quality Flags and Interpretation
-
-### 4.1 Status Indicators in Results Table
-
-The results table displays quality status for each sample:
+**Extrapolation Factor**: Distance from measured temperature range
 
 ```
-Sample         | Concentration | Tm (°C) | R²/SNR | Method | Status
----------------|---------------|---------|--------|--------|--------
-BSA_Control    | —             | 65.42   | 0.997  | TSB    | ✅
-Lysozyme_10uM  | 1.00e-5       | 72.18   | 0.885  | TSB    | ⚠️
-ProteinX_100nM | 1.00e-7       | —       | 0.652  | TSB    | ❌
+T_target = 298K or 310K
+T_measured_range = [T_min, T_max]
+
+Extrapolation_factor = min(|T_target - T_min|, |T_target - T_max|) / (T_max - T_min)
 ```
 
-**Visual cues**:
-- ✅ Green checkmark: High quality
-- ⚠️ Yellow warning: Marginal quality (inspect visually)
-- ❌ Red X: Failed analysis (do not use)
+| Extrapolation Factor | Reliability | Flag |
+|---------------------|-------------|------|
+| < 0.5 | HIGH (interpolation) | ✅ |
+| 0.5 - 1.0 | MEDIUM (mild extrapolation) | ⚠️ |
+| 1.0 - 2.0 | LOW (significant extrapolation) | ⚠️ |
+| > 2.0 | VERY LOW (extreme extrapolation) | ❌ |
 
 ---
 
-### 4.2 Sorting and Filtering
+#### **C. Physical Plausibility**
 
-**Default sort order**:
-1. By status (✅ → ⚠️ → ❌)
-2. By concentration (low to high)
-3. Alphabetically by sample name
+##### **C1. ΔH Range Check**
 
-**Recommended workflow**:
-1. Review ❌ samples: Identify common failure modes
-2. Inspect ⚠️ samples: Decide if acceptable for purpose
-3. Analyze ✅ samples: Proceed with downstream analysis
+| ΔH (kJ/mol) | Interpretation | Flag |
+|-------------|----------------|------|
+| -800 to -50 | Typical for protein unfolding | ✅ |
+| -1200 to -800 or -50 to 0 | Unusual but possible | ⚠️ |
+| < -1200 or > 0 | Unphysical | ❌ |
 
 ---
 
-## Method-Specific Quality Control
+##### **C2. ΔS Range Check**
 
-### 5.1 When to Use Each Method
+| ΔS (J/mol/K) | Interpretation | Flag |
+|--------------|----------------|------|
+| -3000 to -200 | Typical | ✅ |
+| -4000 to -3000 or -200 to 0 | Unusual | ⚠️ |
+| < -4000 or > 0 | Unphysical | ❌ |
 
-| Method | Best For | Strengths | Weaknesses | QC Metric |
-|--------|----------|-----------|------------|-----------|
-| **TSB** | Clean data, single transitions | Thermodynamic parameters, high precision | Sensitive to noise and baselines | R² |
-| **AUC** | Noisy data, screening | Robust to noise, fast | Less precise Tm | R² |
-| **FD** | Quick screening, no fitting | Very fast, model-free | Sensitive to noise, no thermodynamics | SNR |
-
----
-
-### 5.2 Switching Methods for Quality Improvement
-
-**Scenario 1**: TSB gives low R² (0.85) but data looks reasonable
-- **Try**: AUC method
-- **Reason**: AUC is more robust to baseline model misspecification
-
-**Scenario 2**: FD gives low SNR (2.5) but peak is visible
-- **Try**: TSB or AUC
-- **Reason**: Fitting methods can extract Tm from noisy data better than derivative
-
-**Scenario 3**: All methods fail (❌)
-- **Action**: Inspect raw data for experimental issues
-- **Consider**: Repeat experiment, adjust conditions
+**Note**: For ligand binding (not protein unfolding), typical ranges differ
 
 ---
 
-### 5.3 TSB Advanced Settings
+### 4.3 Overall Thermodynamic Quality Assessment
 
-For difficult samples with low TSB R², users can adjust:
+**Combined Reliability Level**:
 
-1. **Smoothing Level** (Savitzky-Golay filter)
-   - **Low** (window=5): Preserve sharp transitions, noisier
-   - **Medium** (window=9, default): Balanced
-   - **High** (window=13): Smoother curves, may blur peaks
+```python
+def assess_thermodynamic_quality(vh_result):
+    """
+    Assess overall thermodynamic analysis quality
 
-2. **Baseline Model**
-   - **Exponential** (default): Standard for DSF
-   - **Linear**: For short temperature ranges
+    Returns:
+        reliability: 'HIGH', 'MEDIUM', 'LOW', 'VERY LOW'
+        flag: '✅', '⚠️', '❌'
+    """
+    r2 = vh_result.r_squared
+    n = vh_result.n_points
+    delta_T = vh_result.t_range
 
-**Effect on quality**:
-- Increased smoothing → Higher R² but lower resolution
-- Optimal balance depends on noise level
+    # Critical failures
+    if n < 3 or r2 < 0.85:
+        return 'VERY LOW', '❌'
+
+    # Score-based assessment
+    score = 0
+
+    # Regression quality (40 points)
+    if r2 >= 0.95:
+        score += 40
+    elif r2 >= 0.90:
+        score += 30
+    else:
+        score += 20
+
+    # Data sufficiency (30 points)
+    if n >= 5:
+        score += 30
+    elif n >= 3:
+        score += 15
+
+    # Temperature range (20 points)
+    if delta_T >= 15:
+        score += 20
+    elif delta_T >= 10:
+        score += 10
+
+    # Physical plausibility (10 points)
+    if -800 < vh_result.delta_h < -50:
+        score += 10
+    elif -1200 < vh_result.delta_h < 0:
+        score += 5
+
+    # Assign reliability
+    if score >= 80:
+        return 'HIGH', '✅'
+    elif score >= 60:
+        return 'MEDIUM', '⚠️'
+    elif score >= 40:
+        return 'LOW', '⚠️'
+    else:
+        return 'VERY LOW', '❌'
+```
+
+---
+
+## Tab 3: Dose-Response QC
+
+### 5.1 Overview
+
+Tab 3 QC evaluates the quality of 4-parameter logistic (4PL) fits for EC₅₀ determination from isothermal dose-response curves.
+
+### 5.2 Quality Metrics
+
+#### **A. 4PL Fit Quality**
+
+##### **A1. Regression R²**
+
+| R² Range | Quality | Flag |
+|----------|---------|------|
+| ≥ 0.95 | Excellent | ✅ |
+| 0.90 - 0.95 | Good | ✅ |
+| 0.85 - 0.90 | Marginal | ⚠️ |
+| < 0.85 | Poor | ❌ |
+
+---
+
+##### **A2. Dynamic Range**
+
+```
+Dynamic Range = (Top - Bottom) / Top × 100%
+```
+
+| Dynamic Range | Quality | Flag |
+|---------------|---------|------|
+| > 60% | Excellent | ✅ |
+| 40-60% | Good | ✅ |
+| 20-40% | Marginal | ⚠️ |
+| < 20% | Poor | ❌ |
+
+**Why it matters**:
+- Low dynamic range → EC₅₀ poorly defined
+- Weak ligand response → Consider higher concentrations
+
+---
+
+##### **A3. Hill Slope**
+
+| Hill Slope | Interpretation | Flag |
+|-----------|----------------|------|
+| 0.8 - 2.0 | Normal cooperativity | ✅ |
+| 0.5 - 0.8 or 2.0 - 3.0 | Unusual cooperativity | ⚠️ |
+| < 0.5 or > 3.0 | Questionable | ❌ |
+
+**Why it matters**:
+- Hill slope ≈ 1: Non-cooperative binding
+- Hill slope > 1: Positive cooperativity
+- Hill slope < 0.5 or > 3: May indicate fitting artifact
+
+---
+
+#### **B. Data Coverage**
+
+##### **B1. Number of Concentrations**
+
+| n_concentrations | Quality | Flag |
+|------------------|---------|------|
+| ≥ 8 | Excellent | ✅ |
+| 6-7 | Good | ✅ |
+| 4-5 | Marginal | ⚠️ |
+| < 4 | Insufficient | ❌ |
+
+---
+
+##### **B2. Concentration Range**
+
+**Coverage of EC₅₀**:
+
+```
+Coverage = log₁₀(C_max / C_min)
+```
+
+| Coverage (log units) | Quality | Flag |
+|---------------------|---------|------|
+| ≥ 3 | Excellent | ✅ |
+| 2-3 | Good | ✅ |
+| 1-2 | Marginal | ⚠️ |
+| < 1 | Narrow | ❌ |
+
+**Bracket Check**: Does concentration range include EC₅₀?
+
+| Status | Flag |
+|--------|------|
+| C_min < EC₅₀ < C_max | ✅ |
+| EC₅₀ near edge (within 0.5 log) | ⚠️ |
+| EC₅₀ outside range | ❌ |
+
+---
+
+#### **C. Baseline Quality**
+
+##### **C1. Bottom Plateau**
+
+Check if low concentrations reach stable baseline:
+
+```
+CV_bottom = std(Response[C < EC₅₀/10]) / mean(Response[C < EC₅₀/10])
+```
+
+| CV_bottom | Quality | Flag |
+|-----------|---------|------|
+| < 5% | Stable | ✅ |
+| 5-10% | Moderate noise | ⚠️ |
+| > 10% | Noisy | ❌ |
+
+---
+
+##### **C2. Top Plateau**
+
+Check if high concentrations reach saturation:
+
+```
+CV_top = std(Response[C > EC₅₀×10]) / mean(Response[C > EC₅₀×10])
+```
+
+Same thresholds as Bottom Plateau.
+
+---
+
+### 5.3 Overall Dose-Response Quality
+
+```python
+def assess_dose_response_quality(dr_result):
+    """
+    Assess dose-response fitting quality
+
+    Returns:
+        flag: '✅', '⚠️', '❌'
+        message: str
+    """
+    r2 = dr_result.r_squared
+    n = dr_result.n_points
+    dynamic_range = dr_result.dynamic_range
+    hill_slope = dr_result.hill_slope
+
+    # Critical failures
+    if n < 4 or r2 < 0.85:
+        return '❌', 'Insufficient data or poor fit'
+
+    if dynamic_range < 20:
+        return '❌', 'Dynamic range too low'
+
+    # Warning conditions
+    warnings = []
+
+    if r2 < 0.90:
+        warnings.append(f'Low R²: {r2:.3f}')
+
+    if n < 6:
+        warnings.append(f'Few concentrations: {n}')
+
+    if dynamic_range < 40:
+        warnings.append(f'Low dynamic range: {dynamic_range:.1f}%')
+
+    if hill_slope < 0.5 or hill_slope > 3.0:
+        warnings.append(f'Unusual Hill slope: {hill_slope:.2f}')
+
+    if warnings:
+        return '⚠️', '; '.join(warnings)
+    else:
+        return '✅', 'High quality fit'
+```
+
+---
+
+## Quality Flags System
+
+### 6.1 Three-Tier System
+
+| Flag | Meaning | Criteria | User Action |
+|------|---------|----------|-------------|
+| ✅ | **PASS** | Meets all quality criteria | Use for quantitative analysis |
+| ⚠️ | **WARNING** | Marginal quality, use with caution | Inspect visually, consider repeating |
+| ❌ | **FAIL** | Poor quality or failed | Exclude from analysis, troubleshoot |
+
+### 6.2 Hover Tooltips
+
+To provide transparency, display detailed quality information on hover:
+
+| Flag | Tooltip Content | Example |
+|------|----------------|---------|
+| ✅ | Brief summary or none | "R²=0.997, State SNR=12.5" |
+| ⚠️ | Specific issue + threshold | "Low R²: 0.856 (threshold: 0.90); State SNR: 4.2 (threshold: 5.0)" |
+| ❌ | Failure reason | "Fit failed to converge" or "Tm not found" |
+
+---
+
+## Implementation Guidelines
+
+### 7.1 Code Structure
+
+**Module: `core/qc/`**
+
+```python
+# core/qc/base.py
+from abc import ABC, abstractmethod
+from pydantic import BaseModel
+from typing import Dict, Any, Literal
+
+class QualityMetrics(BaseModel):
+    """Base QC metrics"""
+    passed: bool
+    flag: Literal['✅', '⚠️', '❌']
+    score: float  # 0-100
+    message: str
+    details: Dict[str, Any]
+
+class QualityController(ABC):
+    """Abstract QC controller"""
+
+    @abstractmethod
+    def evaluate(self, data: Any) -> QualityMetrics:
+        pass
+
+    @abstractmethod
+    def get_metrics(self, data: Any) -> Dict[str, float]:
+        pass
+
+# core/qc/tm_qc.py
+class TmQualityController(QualityController):
+    """Tab 1: Tm quality control"""
+
+    def evaluate(self, tm_result: TmResult) -> QualityMetrics:
+        """Evaluate Tm result quality"""
+        metrics = self.get_metrics(tm_result)
+        flag = self._assign_flag(metrics, tm_result.method)
+        score = self._calculate_score(metrics)
+        message = self._generate_message(metrics, flag)
+
+        return QualityMetrics(
+            passed=(flag == '✅'),
+            flag=flag,
+            score=score,
+            message=message,
+            details=metrics
+        )
+
+    def get_metrics(self, tm_result: TmResult) -> Dict[str, float]:
+        """Calculate all QC metrics for Tm"""
+        if tm_result.method == 'boltzmann':
+            return {
+                'r_squared': tm_result.r_squared,
+                'state_snr': self._calculate_state_snr(tm_result),
+                'delta_aic': self._calculate_delta_aic(tm_result),
+                'tm_error': tm_result.tm_error or 0.0,
+                'n_points': len(tm_result.raw_data.T),
+                't_range': tm_result.raw_data.T.ptp()
+            }
+        # ... similar for auc, derivative
+
+# core/qc/thermo_qc.py
+class ThermodynamicQualityController(QualityController):
+    """Tab 2: Thermodynamic analysis QC"""
+    # Similar structure
+
+# core/qc/dose_response_qc.py
+class DoseResponseQualityController(QualityController):
+    """Tab 3: Dose-response QC"""
+    # Similar structure
+```
+
+### 7.2 Integration with Analysis Code
+
+**Before** (V2 current):
+```python
+# In tm/boltzmann.py
+def analyze_tm_boltzmann(data):
+    # ... fitting code ...
+    tm_result = TmResult(
+        tm=tm,
+        r_squared=r2,
+        # ... other fields ...
+        quality_flag='⚠️' if r2 < 0.90 else '✅'  # INLINE QC - BAD
+    )
+    return tm_result
+```
+
+**After** (V2 with QC module):
+```python
+# In tm/boltzmann.py
+def analyze_tm_boltzmann(data):
+    # ... fitting code ...
+    tm_result = TmResult(
+        tm=tm,
+        r_squared=r2,
+        # ... other fields ...
+        # NO quality_flag here - will be added by QC module
+    )
+    return tm_result
+
+# In analysis pipeline (callbacks or orchestrator)
+from core.qc import TmQualityController
+
+qc = TmQualityController()
+tm_result = analyze_tm_boltzmann(data)
+qc_metrics = qc.evaluate(tm_result)
+
+# Add QC info to result
+tm_result.quality_flag = qc_metrics.flag
+tm_result.qc_score = qc_metrics.score
+tm_result.qc_details = qc_metrics.details
+```
+
+### 7.3 Configuration
+
+Allow users to adjust QC thresholds via settings:
+
+```python
+# core/qc/config.py
+class QCSettings(BaseModel):
+    """QC threshold configuration"""
+
+    # Tab 1: Tm QC
+    tm_r2_excellent: float = 0.95
+    tm_r2_good: float = 0.90
+    tm_r2_marginal: float = 0.80
+
+    tm_state_snr_excellent: float = 10.0
+    tm_state_snr_good: float = 5.0
+    tm_state_snr_marginal: float = 3.0
+
+    tm_delta_aic_strong: float = 2.0
+    tm_delta_aic_preferred: float = 1.0
+
+    # Tab 2: Thermodynamic QC
+    thermo_r2_excellent: float = 0.95
+    thermo_r2_good: float = 0.90
+    thermo_min_points: int = 3
+
+    # Tab 3: Dose-response QC
+    dr_r2_excellent: float = 0.95
+    dr_r2_good: float = 0.90
+    dr_min_dynamic_range: float = 40.0
+
+# Load from config file or use defaults
+qc_settings = QCSettings.load_from_config()
+```
 
 ---
 
 ## Experimental Design Guidelines
 
-### 6.1 Recommended Parameters
+### 8.1 For High-Quality Tm Determination (Tab 1)
 
-#### **For High-Quality Tm Determination**
+| Parameter | Recommended | Minimum |
+|-----------|-------------|---------|
+| Temperature Range | 20-95°C | Tm ± 15°C |
+| Step Size | 0.5-1.0°C | 1.0°C |
+| Protein Concentration | 0.1-1.0 mg/mL | 0.05 mg/mL |
+| Replicates | ≥ 3 | ≥ 2 |
+| Channel | 350/330 nm ratio | — |
 
-| Parameter | Recommended | Minimum | Notes |
-|-----------|-------------|---------|-------|
-| **Temperature Range** | 20-95°C | Tm ± 15°C | Capture full transition |
-| **Step Size** | 0.5-1.0°C | 1.0°C | Finer steps → better resolution |
-| **Ramp Rate** | 1°C/min | 0.5°C/min | Slower → equilibrium |
-| **Protein Concentration** | 0.1-1.0 mg/mL | 0.05 mg/mL | Higher → better SNR |
-| **Replicates** | ≥ 3 | ≥ 2 | Assess reproducibility |
-| **Channel** | 350/330 nm ratio | — | Most robust signal |
+### 8.2 For Thermodynamic Analysis (Tab 2)
 
----
+| Parameter | Recommended | Minimum |
+|-----------|-------------|---------|
+| Concentration Points | 5-8 | 3 |
+| Concentration Range | 2-3 log units | 1 log unit |
+| Temperature Range (of Tms) | ≥ 15°C | ≥ 10°C |
+| Replicates per [L] | ≥ 2 | 1 |
 
-#### **For Thermodynamic Analysis (Van't Hoff)**
+### 8.3 For Dose-Response (Tab 3)
 
-| Parameter | Recommended | Minimum | Notes |
-|-----------|-------------|---------|-------|
-| **Concentration Points** | 5-8 | 3 | More points → better fit |
-| **Concentration Range** | 2-3 log units | 1 log unit | Cover KD ± 10× |
-| **Spacing** | Logarithmic | — | Even coverage on log scale |
-| **Replicates per [L]** | ≥ 2 | 1 | Assess variability |
-| **Include Apo** | Yes | Yes | Establish baseline Tm |
-
-**Example concentration series (KD ~ 1 µM)**:
-```
-0 µM (apo), 0.1, 0.3, 1, 3, 10, 30 µM
-```
-
----
-
-#### **For Dose-Response (EC₅₀ Determination)**
-
-| Parameter | Recommended | Minimum | Notes |
-|-----------|-------------|---------|-------|
-| **Concentration Points** | 8-12 | 6 | Resolve Hill slope |
-| **Range** | EC₅₀ ± 2 log | EC₅₀ ± 1 log | Capture full curve |
-| **Spacing** | Logarithmic | — | Equal spacing on log scale |
-| **Controls** | Apo + saturating | Apo | Establish bounds |
-
----
-
-### 6.2 Instrument Settings
-
-#### **Prometheus NT.Panta**
-- **Excitation**: 280 nm (intrinsic Trp/Tyr)
-- **Emission**: 330 nm + 350 nm
-- **Capillaries**: Standard or high-sensitivity
-- **Sample Volume**: 10 µL (standard)
-- **Power**: 10-100% (optimize for signal)
-
-#### **Tycho NT.6**
-- **LED Power**: Auto or 50-100%
-- **Sample Volume**: 10 µL
-- **Capillaries**: 6 per run
-- **Channels**: All three (ratio, 330, 350)
-
----
-
-### 6.3 Sample Preparation
-
-**Critical factors**:
-1. **Buffer Choice**
-   - pH 7-8 (physiological)
-   - Low ionic strength if studying ionic interactions
-   - Avoid HEPES at high pH (protonation changes with T)
-
-2. **Sample Quality**
-   - Centrifuge (10 min, 14,000×g) to remove aggregates
-   - Filter if needed (0.22 µm)
-   - Check A280 for accurate concentration
-
-3. **Controls**
-   - **Apo protein**: No ligand (baseline Tm)
-   - **Known stabilizer**: Positive control (e.g., substrate analog)
-   - **Buffer blank**: Check for artifacts
-
-4. **Replicates**
-   - Technical replicates: Same sample, multiple capillaries (assess instrument variability)
-   - Biological replicates: Independent preparations (assess prep-to-prep variation)
+| Parameter | Recommended | Minimum |
+|-----------|-------------|---------|
+| Concentration Points | 8-12 | 6 |
+| Concentration Range | EC₅₀ ± 2 log | EC₅₀ ± 1 log |
+| Include Apo | Yes | Yes |
+| Include Saturation | Yes | Yes |
 
 ---
 
 ## Troubleshooting Guide
 
-### 7.1 Common Issues and Solutions
+### 9.1 Tab 1: Tm Quality Issues
 
-#### **Issue 1: Low R² (TSB/AUC < 0.90)**
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Low R² (TSB) | Noisy data, complex unfolding | Try AUC method; increase smoothing |
+| Low State SNR | Weak transition, multi-domain | Check protein stability; increase concentration |
+| Low ΔAIC | Transition too simple | Use AUC/FD instead of TSB |
+| Low Peak SNR (FD) | Weak signal, high noise | Use TSB/AUC; increase concentration |
 
-| Possible Cause | Diagnostic | Solution |
-|----------------|-----------|----------|
-| **Noisy signal** | High scatter in curve | • Increase protein concentration<br>• Use AUC instead of TSB<br>• Increase smoothing |
-| **Multiple transitions** | Shoulders, inflections | • Protein may have multiple domains<br>• Try FD to identify peaks<br>• Fit individual domains separately |
-| **Baseline drift** | Non-flat pre/post transition | • Check for bubbles, precipitation<br>• Adjust baseline model<br>• Re-run with fresh sample |
-| **Incomplete unfolding** | No upper plateau | • Extend temperature range<br>• Increase to 95°C or higher<br>• May be irreversible aggregation |
+### 9.2 Tab 2: Thermodynamic Quality Issues
 
----
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Low regression R² | Scattered Tms, non-linearity | Check Tab 1 quality; exclude outliers |
+| High ΔH error | Too few points, narrow ΔT | Add more concentrations; wider temperature range |
+| Unphysical ΔH | Poor fits, wrong baseline | Check individual Tm fits; verify buffer conditions |
+| HIGH extrapolation | Target T outside measured range | Measure Tms closer to target temperature |
 
-#### **Issue 2: Low SNR (FD < 3.0)**
+### 9.3 Tab 3: Dose-Response Quality Issues
 
-| Possible Cause | Diagnostic | Solution |
-|----------------|-----------|----------|
-| **Weak signal** | Low amplitude | • Increase protein concentration<br>• Check Trp/Tyr content<br>• Use TSB/AUC instead |
-| **Broad transition** | Wide peak (> 10°C) | • Expected for multi-domain proteins<br>• Lower SNR is normal<br>• Use TSB for quantification |
-| **High noise** | Spiky derivative | • Increase smoothing<br>• Check for bubbles/debris<br>• Centrifuge sample |
-| **No transition** | Flat derivative | • Extend temperature range<br>• Check protein is folded<br>• Verify sample identity |
-
----
-
-#### **Issue 3: Tm Not Detected (❌)**
-
-| Possible Cause | Diagnostic | Solution |
-|----------------|-----------|----------|
-| **Tm outside range** | No transition visible | • Extend temperature range<br>• Check expected Tm for protein |
-| **Protein already denatured** | Flat signal | • Check sample storage<br>• Prepare fresh sample<br>• Verify folding (CD, activity) |
-| **Aggregation** | Turbidity, scatter | • Centrifuge before loading<br>• Lower concentration<br>• Add detergent/stabilizer |
-| **Reversible oligomerization** | Concentration-dependent | • Run dilution series<br>• Check monomer fraction (SEC) |
-
----
-
-#### **Issue 4: Poor Reproducibility (High CV)**
-
-| Possible Cause | Diagnostic | Solution |
-|----------------|-----------|----------|
-| **Sample heterogeneity** | CV > 5% | • Filter/centrifuge<br>• Check for aggregation (DLS)<br>• Prepare fresh sample |
-| **Instrument variability** | CV 2-5% | • Normal for nanoDSF<br>• Use more replicates<br>• Calibrate instrument |
-| **Buffer mismatch** | Systematic shift | • Ensure all samples in same buffer<br>• Dialyze if needed |
-| **Temperature calibration** | Consistent offset | • Run Tm standard (lysozyme, BSA)<br>• Calibrate instrument |
-
----
-
-#### **Issue 5: Concentration Not Detected**
-
-| Problem | Example | Solution |
-|---------|---------|----------|
-| **Non-standard format** | `10microM` | Use `10uM`, `10µM`, or `10 uM` |
-| **Missing unit** | `Sample_10` | Add unit: `Sample_10uM` |
-| **Unit in wrong place** | `uM10_Sample` | Move to end: `Sample_10uM` |
-| **Ambiguous** | `0.1` | Specify unit: `0.1uM` or `100nM` |
-
----
-
-### 7.2 Systematic Quality Issues
-
-#### **All samples have low quality**
-
-**Likely causes**:
-1. Instrument issue (LED power, detector)
-2. Buffer incompatibility (pH, ionic strength)
-3. Universal sample issue (old stock, wrong buffer)
-4. Wrong analysis method for sample type
-
-**Recommended action**:
-1. Run positive control (lysozyme, BSA)
-2. Check instrument calibration
-3. Verify buffer composition
-4. Re-prepare samples from fresh stock
-
----
-
-#### **Specific condition always fails**
-
-**Example**: All samples with ligand X show ❌
-
-**Possible causes**:
-1. Ligand causes aggregation
-2. Ligand absorbs/fluoresces at detection wavelength
-3. Ligand destabilizes beyond temperature range
-4. Solubility issue (precipitation)
-
-**Recommended action**:
-1. Check ligand spectrum (UV-Vis)
-2. Run ligand-only control (no protein)
-3. Examine samples post-run (clarity)
-4. Try different ligand concentration range
-
----
-
-## Best Practices
-
-### 8.1 Quality Control Checklist
-
-**Before experiment**:
-- [ ] Protein concentration verified (A280)
-- [ ] Sample centrifuged/filtered
-- [ ] Buffer composition documented
-- [ ] Positive control included
-- [ ] Temperature range covers expected Tm ± 15°C
-
-**During experiment**:
-- [ ] Capillaries loaded without bubbles
-- [ ] Signal amplitude reasonable (not saturated)
-- [ ] No obvious aggregation/precipitation
-
-**After experiment**:
-- [ ] Check % of samples with ✅ status (target: > 80%)
-- [ ] Inspect ⚠️ samples visually
-- [ ] Investigate systematic failures (all ❌ for one condition)
-- [ ] Compare replicates (CV < 5%)
-
----
-
-### 8.2 Reporting Quality Metrics
-
-When publishing or sharing results:
-
-**Required information**:
-1. Analysis method used (TSB, AUC, FD)
-2. Quality metric threshold (e.g., R² ≥ 0.90)
-3. Number of replicates
-4. % of samples passing QC
-5. How failed samples were handled
-
-**Example statement**:
-> "Tm values were determined using the Two-State Boltzmann method in QuantDSF v2.0. Only samples with R² ≥ 0.90 were included in downstream analysis (95% pass rate, n=3 replicates per condition, CV < 3%)."
-
----
-
-### 8.3 Data Archiving
-
-**Recommended to save**:
-1. Raw instrument files (.zip from Prometheus/Tycho)
-2. QuantDSF results (.xlsx export)
-3. Quality control summary (% pass/warn/fail)
-4. Plots (melting curves, distributions)
-5. Analysis settings (method, parameters)
-
-**For reproducibility**:
-- Document QuantDSF version
-- Note any advanced settings used (smoothing, baseline model)
-- Include experimental metadata (date, operator, instrument)
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Low R² | Noisy data, wrong model | Check replicates; try different temperature |
+| Low dynamic range | Weak ligand, poor protein quality | Increase ligand concentration; check protein activity |
+| EC₅₀ not bracketed | Wrong concentration range | Expand concentration series around EC₅₀ |
+| Unusual Hill slope | Cooperativity, artifacts | Check protein oligomerization; repeat experiment |
 
 ---
 
 ## Summary
 
-QuantDSF's quality control system ensures:
+QuantDSF v2.1 implements comprehensive, modular quality control across all three analysis tabs:
 
-✅ **Transparency**: All metrics clearly reported
-✅ **Automation**: No manual scoring required
-✅ **Flexibility**: Multiple methods for different data types
-✅ **Clarity**: Visual indicators for immediate interpretation
+✅ **Tab 1 (Basic Analysis)**: Per-capillary Tm quality
+- R², State SNR, ΔAIC (TSB)
+- R², Dynamic Range (AUC)
+- Peak SNR, Peak Width (FD)
 
-**Key takeaways**:
-1. Always check quality status (✅ ⚠️ ❌) before interpreting Tm
-2. Use method-specific metrics (R² for TSB/AUC, SNR for FD)
-3. Inspect ⚠️ samples manually before including in analysis
-4. Exclude ❌ samples from quantitative comparisons
-5. Optimize experimental design for high-quality data
+✅ **Tab 2 (Thermodynamics)**: Van't Hoff regression reliability
+- Regression R², n_points, ΔT
+- Parameter uncertainty, extrapolation factor
+- Physical plausibility checks
+
+✅ **Tab 3 (Dose-Response)**: 4PL fitting quality
+- R², dynamic range, Hill slope
+- Concentration coverage, bracketing
+- Baseline stability
+
+**Key improvements from V1**:
+- ⭐ State SNR added back to TSB QC
+- ⭐ ΔAIC model selection added back
+- 🔧 QC logic separated into dedicated module
+- 📊 Consistent three-tier flagging across all tabs
+- 🎯 Tab-specific QC criteria clearly defined
 
 ---
 
 ## Related Documentation
 
-- **[IO_SPECIFICATION.md](IO_SPECIFICATION.md)** - Input/output formats and error messages
-- **[SMOOTHING_METHODOLOGY.md](SMOOTHING_METHODOLOGY.md)** - Signal processing details
-- **[ADVANCED_SETTINGS_TSB_SMOOTHING.md](ADVANCED_SETTINGS_TSB_SMOOTHING.md)** - TSB parameter tuning
+- **[IO_SPECIFICATION.md](IO_SPECIFICATION.md)** - Input/output formats
+- **[SMOOTHING_METHODOLOGY.md](SMOOTHING_METHODOLOGY.md)** - Signal processing
+- **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** - Implementation details
 
 ---
 
 ## Contact
 
-For questions about quality control:
+For QC-related questions:
 - **GitHub Issues**: [https://github.com/shuozhou87/QuantDSF/issues](https://github.com/shuozhou87/QuantDSF/issues)
-- **Production Server**: http://g1200163267.win.uthscsa.edu:9051/
 
 ---
 
