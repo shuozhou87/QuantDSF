@@ -36,7 +36,6 @@ QuantDSF v2 is a comprehensive desktop application for protein thermal stability
 
 ### User Interface
 - Interactive Dash-based web interface
-- PyWebView desktop wrapper for native window experience
 - Real-time data visualization with Plotly
 - Excel export functionality
 
@@ -61,8 +60,8 @@ QuantDSF/
 │   │   └── exporters/   # Result exporters
 │   └── utils/           # Utility functions
 │
-├── desktop_app.py        # Desktop application entry point
-└── requirements_v2.txt   # Python dependencies
+├── app_v2.py            # Web application entry point
+└── requirements_v2.txt  # Python dependencies
 ```
 
 ## Installation
@@ -99,12 +98,8 @@ pip install -r requirements_v2.txt
 - **Access**: Internal network only (requires VPN for external access)
 - **Status**: Production - all latest features deployed
 
-### Desktop Application (Local)
-```bash
-python desktop_app.py
-```
+### Local Development
 
-### Web Interface (Development)
 ```bash
 python app_v2.py
 ```
@@ -124,8 +119,6 @@ Comprehensive documentation is available in the `docs/` directory.
 - [Architecture Proposal](docs/V2_ARCHITECTURE_PROPOSAL.md) - System design
 - [Multicore Parallelization](docs/MULTICORE_PARALLELIZATION.md) - Performance optimization
 - [Single-Curve Thermodynamics](docs/SINGLE_CURVE_THERMODYNAMICS.md) - Core innovation
-- [Desktop App Guide](docs/DESKTOP_APP_GUIDE.md) - Desktop application usage
-- [Nuitka Build Guide](docs/NUITKA_BUILD_GUIDE.md) - Building executables
 - [Developer Guide](docs/DEVELOPER_GUIDE.md) - Contributing to the project
 
 ## Technical Highlights
@@ -133,7 +126,7 @@ Comprehensive documentation is available in the `docs/` directory.
 1. **Separation of Concerns**: Complete decoupling of UI and core computation layers
 2. **Type Safety**: 100% type hints coverage with Pydantic validation
 3. **Data-Driven**: Support for multiple Tm determination methods with automatic quality metrics
-4. **Cross-Platform**: Web version (any browser) + Desktop version (native window)
+4. **Web-Based**: Browser-accessible interface with real-time visualization
 5. **Extensible**: Modular architecture for easy maintenance and feature addition
 
 ## Use Cases
@@ -150,7 +143,7 @@ Comprehensive documentation is available in the `docs/` directory.
 - Complete rewrite with layered architecture
 - Multicore parallelization support
 - Enhanced thermodynamic analysis
-- Desktop application with PyWebView
+- Web-based interface with Dash
 - Comprehensive quality control metrics
 
 ### v1.0 (Deprecated)
