@@ -92,7 +92,14 @@ pip install -r requirements_v2.txt
 
 ## Usage
 
-### Desktop Application
+### Production Deployment (UTHSCSA Internal)
+
+**Live Instance**: [http://g1200163267.win.uthscsa.edu:9051/](http://g1200163267.win.uthscsa.edu:9051/)
+- **Server**: Windows Server (UTHSCSA internal network)
+- **Access**: Internal network only (requires VPN for external access)
+- **Status**: Production - all latest features deployed
+
+### Desktop Application (Local)
 ```bash
 python desktop_app.py
 ```
