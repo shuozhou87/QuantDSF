@@ -22,6 +22,11 @@
   - 分层架构说明
   - 模块职责划分
   - 数据流设计
+- [IO_SPECIFICATION.md](IO_SPECIFICATION.md) - 输入输出规范 **[重要]**
+  - 支持的文件格式
+  - 输出格式规范
+  - 错误消息定义
+  - 数据质量标准
 - [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) - 开发者指南
   - 代码规范
   - 项目结构
@@ -105,6 +110,7 @@
 | 了解项目动机 | [WHY_QUANTDSF.md](WHY_QUANTDSF.md) |
 | 快速开始使用 | [QUICK_START_SINGLE_CURVE.md](QUICK_START_SINGLE_CURVE.md) |
 | 理解架构设计 | [V2_ARCHITECTURE_PROPOSAL.md](V2_ARCHITECTURE_PROPOSAL.md) |
+| 查看输入输出规范 | [IO_SPECIFICATION.md](IO_SPECIFICATION.md) |
 | 学习单曲线热力学 | [SINGLE_CURVE_THERMODYNAMICS.md](SINGLE_CURVE_THERMODYNAMICS.md) |
 | 提升分析性能 | [MULTICORE_PARALLELIZATION.md](MULTICORE_PARALLELIZATION.md) |
 | 参与开发 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) |
