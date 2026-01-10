@@ -1,8 +1,8 @@
 # QuantDSF Quality Control Specification
 
-**Version**: 2.2
+**Version**: 2.3 (v0.9 Guidelines Compliant)
 **Last Updated**: 2026-01-09
-**Status**: Production - Implemented
+**Status**: Production - Implemented with v0.9 Features
 
 ---
 
@@ -40,6 +40,12 @@ QuantDSF implements tab-specific quality control systems to ensure reliable anal
    - No red, yellow ≥ green → Overall ⚠️
    - Otherwise → Overall ✅
 7. **Detailed Tooltips**: Hover shows all individual metrics and flags
+8. **v0.9 Compliance** ⭐ **[NEW]**:
+   - Standardized machine-readable reason codes
+   - Onset/offset transition bounds detection
+   - Mandatory minimum slicing points (N ≥ 5)
+   - Window placement validation (within transition region)
+   - Dynamic range requirements for thermodynamic analysis
 
 ---
 
@@ -500,6 +506,159 @@ Example Tooltip (Overall ✅, but has yellow flags):
 - Full transparency: users see all QC details
 - Yellow flags visible even when overall passes
 - Encourages critical data review
+
+---
+
+## v0.9 Guidelines Implementation ⭐ **[NEW]**
+
+### Overview
+
+QuantDSF now implements all high-priority requirements from **QuantDSF_QC_Guidelines_v0.9.docx**:
+
+1. **Standardized Reason Codes** (machine-readable)
+2. **Onset/Offset Detection** (transition bounds)
+3. **Minimum Slicing Points** (N ≥ 5 for thermodynamics)
+4. **Window Placement Validation** (must be within transition region)
+5. **Dynamic Range Requirements** (≥ 30% for thermodynamic analysis)
+
+### Standardized QC Reason Codes
+
+All QC controllers now generate **machine-readable reason codes** for failed/warning QC criteria.
+
+**Available Reason Codes:**
+
+| Code | Category | Description |
+|------|----------|-------------|
+| `BASELINE_UNSTABLE` | Tab 1 | Baseline shows excessive jitter or erratic fluctuation |
+| `NO_TRANSITION_DETECTED` | Tab 1 | No credible thermal transition could be identified |
+| `INSUFFICIENT_DATA_POINTS` | Tab 1 | Too few data points for reliable analysis |
+| `LOW_FIT_QUALITY` | Tab 1 | R² below acceptable threshold |
+| `LOW_STATE_SNR` | Tab 1 | Poorly defined native/denatured states |
+| `INSUFFICIENT_MODEL_SUPPORT` | Tab 1 | ΔAIC/ΔBIC too low (TSB overfitting) |
+| `HIGH_TM_UNCERTAINTY` | Tab 1 | Tm error exceeds acceptable threshold |
+| `LOW_DYNAMIC_RANGE` | Tab 1/3 | Insufficient signal change |
+| `LOW_PEAK_SNR` | Tab 1 | First derivative peak has poor SNR |
+| `MODEL_MISMATCH_MULTIPEAK` | Tab 1 | Multiple transitions detected |
+| `INSUFFICIENT_SLICING_POINTS` | Tab 2 | N < 5 temperature slices ⭐ |
+| `WINDOW_OUTSIDE_TRANSITION` | Tab 2 | Window outside [onset, offset] bounds ⭐ |
+| `INSUFFICIENT_CONCENTRATION_RANGE` | Tab 2 | Temperature range too narrow |
+| `LOW_VH_FIT_QUALITY` | Tab 2 | Van't Hoff R² too low |
+| `THERMODYNAMIC_PARAMETER_OUT_OF_RANGE` | Tab 2 | ΔH or ΔS outside plausible range |
+| `EXTRAPOLATED_KD` | Tab 2 | KD requires extrapolation |
+| `INSUFFICIENT_RESPONSE_COVERAGE` | Tab 3 | Dataset doesn't cover response transition (< 60%) |
+| `INSUFFICIENT_CONCENTRATION_POINTS` | Tab 3 | Too few concentration points (< 6) |
+| `FIT_NONCONVERGENCE` | Tab 3 | 4PL fitting failed to converge |
+| `IMPLAUSIBLE_HILL_SLOPE` | Tab 3 | Hill slope outside typical range (0.5-4.0) |
+| `EC50_OUTSIDE_RANGE` | Tab 3 | EC50 is extrapolated |
+
+**Usage Example:**
+```python
+from core.qc import TmQualityController, format_reason_message
+
+qc = TmQualityController()
+result = qc.evaluate(tm_result)
+
+# Get reason codes
+for code in result.reason_codes:
+    print(format_reason_message(code, include_action=True))
+
+# Output:
+# Low State SNR: Poorly defined native and denatured states relative to fitting noise.
+# → Improve signal quality. Check protein concentration. Consider different fluorescence channel.
+```
+
+### Onset/Offset Detection ⭐
+
+**Purpose**: Detect transition boundaries to validate temperature window selection.
+
+**Implementation**: [`core/qc/transition_bounds.py`](../core/qc/transition_bounds.py)
+
+**Methods**:
+1. **Derivative Method** (default): Detects where dF/dT crosses threshold
+2. **Threshold Method**: Detects 10%-90% progress points
+3. **Curvature Method**: Detects local maxima in d²F/dT²
+
+**Example:**
+```python
+from core.qc import detect_transition_bounds
+
+onset, offset = detect_transition_bounds(
+    T=temperature_array,  # °C
+    F=fluorescence_array,
+    Tm=tm_value,
+    method='derivative',
+    sigma=2.0,
+    threshold_fraction=0.1
+)
+
+# Typical output: onset=45.2°C, offset=62.8°C for Tm=54.0°C
+```
+
+**Window Validation:**
+```python
+from core.qc import validate_window_in_transition
+
+window_valid = validate_window_in_transition(
+    T_window_start=48.0,
+    T_window_end=60.0,
+    onset=45.2,
+    offset=62.8,
+    tolerance=5.0  # Allow ±5°C outside bounds
+)
+
+# Returns True if window is within [onset-5, offset+5]
+```
+
+### Thermodynamic Analysis: v0.9 Mandatory Criteria
+
+**Tab 2 now enforces v0.9 MANDATORY rules:**
+
+| Criterion | Requirement | Flag if Failed |
+|-----------|-------------|----------------|
+| **Minimum Slicing Points** | N ≥ 5 | ❌ Red |
+| **Window Placement** | Within [onset, offset] ± 5°C | ❌ Red |
+| **Dynamic Range** | ≥ 30% (within window) | ❌ Red |
+| Dynamic Range | 30-60% | ⚠️ Yellow |
+| Dynamic Range | ≥ 60% | ✅ Green |
+
+**Implementation Example:**
+```python
+from core.qc import ThermodynamicQualityController
+
+qc_thermo = ThermodynamicQualityController()
+
+thermo_result = {
+    'vh_r2': 0.97,
+    'vh_n_points': 6,
+    'delta_T': 15.0,
+    'n_slices': 8,  # ✅ N >= 5
+    'T_window_start': 48.0,
+    'T_window_end': 60.0,
+    'Tm': 54.0,
+    'T_array': T_data,
+    'F_array': F_data,
+    'dynamic_range': 72.0,  # ✅ >= 60%
+    # ... other fields
+}
+
+result = qc_thermo.evaluate(thermo_result)
+
+# If n_slices < 5: reason_codes = ['INSUFFICIENT_SLICING_POINTS'], flag = '❌'
+# If window outside transition: reason_codes = ['WINDOW_OUTSIDE_TRANSITION'], flag = '❌'
+# If dynamic_range < 30%: flag = '❌'
+```
+
+### User-Adjusted Thresholds (Future)
+
+**v0.9 Recommendation** (not yet implemented):
+- Track which QC thresholds user has modified from defaults
+- Export reports must document default vs custom thresholds
+- Mark results as "exploratory" if non-default thresholds used
+
+**Planned for v2.4:**
+- Add `threshold_overrides` field to `QCSettings`
+- Log threshold modifications in `QualityMetrics.details`
+- Include threshold provenance in export files
 
 ---
 
