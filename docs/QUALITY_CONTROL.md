@@ -529,6 +529,10 @@ All QC controllers now generate **machine-readable reason codes** for failed/war
 
 | Code | Category | Description |
 |------|----------|-------------|
+| `DATA_LENGTH_MISMATCH` | Integrity | Temperature and fluorescence arrays have different lengths ⭐ |
+| `TEMPERATURE_CONTAINS_NAN_OR_INF` | Integrity | Temperature array contains invalid values ⭐ |
+| `SIGNAL_CONTAINS_NAN_OR_INF` | Integrity | Fluorescence signal contains invalid values ⭐ |
+| `TEMPERATURE_NOT_MONOTONIC` | Integrity | Temperature does not increase monotonically ⭐ |
 | `BASELINE_UNSTABLE` | Tab 1 | Baseline shows excessive jitter or erratic fluctuation |
 | `NO_TRANSITION_DETECTED` | Tab 1 | No credible thermal transition could be identified |
 | `INSUFFICIENT_DATA_POINTS` | Tab 1 | Too few data points for reliable analysis |
@@ -647,6 +651,85 @@ result = qc_thermo.evaluate(thermo_result)
 # If window outside transition: reason_codes = ['WINDOW_OUTSIDE_TRANSITION'], flag = '❌'
 # If dynamic_range < 30%: flag = '❌'
 ```
+
+### Data Integrity Checks ⭐ **[IMPLEMENTED]**
+
+**Purpose**: Validate basic data quality before QC analysis (v0.9 requirement).
+
+**Implementation**: [`core/qc/data_integrity.py`](../core/qc/data_integrity.py)
+
+**Mandatory Checks**:
+1. **Non-empty arrays**: Temperature and fluorescence arrays must contain data
+2. **Same length**: T and F arrays must have equal length
+3. **No NaN/Inf**: All values must be finite
+4. **Monotonic temperature**: Temperature must strictly increase (thermal ramp requirement)
+5. **Minimum points**: At least 20 data points required
+
+**Usage**:
+```python
+from core.qc import check_data_integrity
+
+is_valid, reason_code = check_data_integrity(T, F, min_points=20)
+
+if not is_valid:
+    # Return failed QC immediately
+    return QualityMetrics(
+        passed=False,
+        flag='❌',
+        score=0.0,
+        message=f"Data integrity check failed: {reason_code}",
+        reason_codes=[reason_code]
+    )
+```
+
+**Reason Codes**:
+- `DATA_LENGTH_MISMATCH`: T and F arrays have different lengths
+- `TEMPERATURE_CONTAINS_NAN_OR_INF`: Invalid temperature values
+- `SIGNAL_CONTAINS_NAN_OR_INF`: Invalid signal values
+- `TEMPERATURE_NOT_MONOTONIC`: Temperature not strictly increasing
+- `INSUFFICIENT_DATA_POINTS`: Too few data points (< 20)
+
+**Integration**: Data integrity checks are executed at the beginning of `TmQualityController.evaluate()`, before any QC metric calculation.
+
+---
+
+### Baseline Stability Checks ❌ **[INTENTIONALLY NOT IMPLEMENTED]**
+
+**v0.9 Guideline**: "baseline jitter/erratic fluctuation or severe drift triggers a flag"
+
+**Decision: NOT IMPLEMENTED**
+
+**Rationale**:
+
+1. **High False Positive Risk**:
+   - Low protein concentrations → naturally higher baseline noise
+   - Strict baseline checks would reject many valid low-concentration samples
+   - Difficult to distinguish biological noise from true instrument problems
+
+2. **Threshold Setting Challenges**:
+   - What constitutes "excessive jitter"?
+   - Baseline region definition varies with onset/offset detection
+   - Heating rate variations affect baseline characteristics
+   - No universally applicable threshold
+
+3. **Redundancy with Existing QC**:
+   - True problems (bubbles, particles) are captured by:
+     - **Low R²**: Poor fit quality
+     - **Low State SNR**: Poorly defined transition states
+     - **High Tm Error**: Unstable fitting
+   - Baseline checks provide minimal additional diagnostic value
+
+4. **Conservative Approach**:
+   - Better to have false negatives (miss minor baseline issues) than false positives (reject valid data)
+   - Users can visually inspect data if other QC metrics suggest problems
+   - Future implementation possible if user feedback indicates need
+
+**Recommendation**: If baseline issues are suspected, review:
+- R² (should be high)
+- State SNR (should be ≥3)
+- Visual inspection of raw data curves
+
+---
 
 ### User-Adjusted Thresholds (Future)
 

@@ -27,6 +27,11 @@ from .transition_bounds import (
     validate_window_in_transition,
     calculate_transition_width,
 )
+from .data_integrity import (
+    check_data_integrity,
+    validate_temperature_range,
+    validate_signal_range,
+)
 
 __all__ = [
     'QualityMetrics',
@@ -42,4 +47,7 @@ __all__ = [
     'detect_transition_bounds',
     'validate_window_in_transition',
     'calculate_transition_width',
+    'check_data_integrity',
+    'validate_temperature_range',
+    'validate_signal_range',
 ]

@@ -20,6 +20,36 @@ class QCReasonCode(BaseModel):
     recommended_action: Optional[str] = None
 
 
+# ==================== Data Integrity Checks (v0.9) ====================
+
+DATA_LENGTH_MISMATCH = QCReasonCode(
+    code="DATA_LENGTH_MISMATCH",
+    display_name="Data Length Mismatch",
+    description="Temperature and fluorescence arrays have different lengths.",
+    recommended_action="Check data acquisition. Ensure temperature and signal arrays are properly aligned."
+)
+
+TEMPERATURE_CONTAINS_NAN_OR_INF = QCReasonCode(
+    code="TEMPERATURE_CONTAINS_NAN_OR_INF",
+    display_name="Invalid Temperature Values",
+    description="Temperature array contains NaN or Inf values.",
+    recommended_action="Check data acquisition. Replace or remove invalid temperature readings."
+)
+
+SIGNAL_CONTAINS_NAN_OR_INF = QCReasonCode(
+    code="SIGNAL_CONTAINS_NAN_OR_INF",
+    display_name="Invalid Signal Values",
+    description="Fluorescence signal contains NaN or Inf values.",
+    recommended_action="Check detector settings. Replace or interpolate invalid signal readings."
+)
+
+TEMPERATURE_NOT_MONOTONIC = QCReasonCode(
+    code="TEMPERATURE_NOT_MONOTONIC",
+    display_name="Temperature Not Monotonic",
+    description="Temperature does not increase monotonically (required for thermal ramp analysis).",
+    recommended_action="Check data acquisition. Ensure proper temperature ramp without cooling cycles."
+)
+
 # ==================== Tab 1: Basic Analysis Reason Codes ====================
 
 BASELINE_UNSTABLE = QCReasonCode(
@@ -177,6 +207,12 @@ EC50_OUTSIDE_RANGE = QCReasonCode(
 # ==================== Reason Code Registry ====================
 
 REASON_CODE_REGISTRY: Dict[str, QCReasonCode] = {
+    # Data Integrity
+    "DATA_LENGTH_MISMATCH": DATA_LENGTH_MISMATCH,
+    "TEMPERATURE_CONTAINS_NAN_OR_INF": TEMPERATURE_CONTAINS_NAN_OR_INF,
+    "SIGNAL_CONTAINS_NAN_OR_INF": SIGNAL_CONTAINS_NAN_OR_INF,
+    "TEMPERATURE_NOT_MONOTONIC": TEMPERATURE_NOT_MONOTONIC,
+
     # Tab 1
     "BASELINE_UNSTABLE": BASELINE_UNSTABLE,
     "NO_TRANSITION_DETECTED": NO_TRANSITION_DETECTED,
