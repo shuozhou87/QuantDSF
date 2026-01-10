@@ -1,8 +1,8 @@
 # QuantDSF Quality Control Specification
 
-**Version**: 2.1
+**Version**: 2.2
 **Last Updated**: 2026-01-09
-**Status**: Production - Implementation Required
+**Status**: Production - Implemented
 
 ---
 
@@ -34,7 +34,12 @@ QuantDSF implements tab-specific quality control systems to ensure reliable anal
 2. **Tab-Specific Metrics**: Each tab has appropriate QC criteria
 3. **Automated Assessment**: All metrics calculated automatically
 4. **Transparent Reporting**: Users see all quality parameters
-5. **Three-Tier System**: ✅ Pass, ⚠️ Warning, ❌ Fail
+5. **Individual Flag System**: Each QC metric gets independent flag (✅/⚠️/❌)
+6. **Overall Flag Logic**:
+   - Any red flag → Overall ❌ (one-vote veto)
+   - No red, yellow ≥ green → Overall ⚠️
+   - Otherwise → Overall ✅
+7. **Detailed Tooltips**: Hover shows all individual metrics and flags
 
 ---
 
@@ -168,7 +173,7 @@ R² = 1 - (SS_res / SS_tot)
 
 ---
 
-##### **B2. State SNR** ⭐ **[FROM V1 - NEEDS IMPLEMENTATION]**
+##### **B2. State SNR** ⭐ **[IMPLEMENTED]**
 
 **Definition**: Signal-to-noise ratio of the two-state transition
 
@@ -181,12 +186,16 @@ Where:
 - `F_D(Tm) = A_D·exp(β·Tm) + D_D` (denatured state fluorescence at Tm)
 - `σ_residual = sqrt(RSS / df)` (residual standard error)
 
-| Quality Tier | State SNR | Interpretation |
-|--------------|-----------|----------------|
-| **Excellent** ✅ | ≥ 10.0 | Well-defined transition |
-| **Good** ✅ | 5.0 - 10.0 | Clear transition |
-| **Marginal** ⚠️ | 3.0 - 5.0 | Weak but detectable |
-| **Poor** ❌ | < 3.0 | Poorly defined states |
+| Quality Tier | State SNR | Flag | Note |
+|--------------|-----------|------|------|
+| **Excellent** | ≥ 10.0 | ✅ | Well-defined transition |
+| **Acceptable** | 3.0 - 10.0 | ⚠️ | Marginal but usable (no "good" tier) |
+| **Poor** | < 3.0 | ❌ | Poorly defined states |
+
+**Rationale for No "Good" Tier**:
+- State SNR 3-10 is considered marginal quality
+- Provides caution flag even for moderately defined transitions
+- Encourages experimental optimization
 
 **Why State SNR matters**:
 - R² only measures overall fit quality
@@ -229,26 +238,42 @@ def calculate_state_snr(T, F, popt, F_fit):
 
 ---
 
-##### **B3. Model Selection: ΔAIC** ⭐ **[FROM V1 - NEEDS IMPLEMENTATION]**
+##### **B3. Model Selection: ΔAIC and ΔBIC** ⭐ **[IMPLEMENTED]**
 
-**Definition**: Akaike Information Criterion difference between linear and TSB models
+**Definition**: Information criteria comparing linear vs TSB models
 
+**AIC (Akaike Information Criterion)**:
 ```
 AIC = n·ln(RSS/n) + 2·k
 
-AIC_linear = n·ln(RSS_linear/n) + 2·3   # 3 parameters: slope, intercept, Tm
+AIC_linear = n·ln(RSS_linear/n) + 2·3   # 3 parameters
 AIC_TSB = n·ln(RSS_TSB/n) + 2·8         # 8 parameters
 
 ΔAIC = AIC_linear - AIC_TSB
 log₁₀(ΔAIC) = preferred metric for interpretation
 ```
 
-| log₁₀(ΔAIC) | Interpretation | Flag |
-|-------------|----------------|------|
+**BIC (Bayesian Information Criterion)**:
+```
+BIC = n·ln(RSS/n) + k·ln(n)
+
+BIC_linear = n·ln(RSS_linear/n) + 3·ln(n)
+BIC_TSB = n·ln(RSS_TSB/n) + 8·ln(n)
+
+ΔBIC = BIC_linear - BIC_TSB
+log₁₀(ΔBIC) = preferred metric for interpretation
+```
+
+**Note**: BIC penalizes model complexity more strongly than AIC (k·ln(n) vs 2·k)
+
+| log₁₀(Δ) | Interpretation | Flag |
+|----------|----------------|------|
 | ≥ 2.0 | TSB strongly preferred | ✅ |
 | 1.0 - 2.0 | TSB preferred | ✅ |
 | 0.5 - 1.0 | TSB marginally better | ⚠️ |
-| < 0.5 | Linear model sufficient | ⚠️ |
+| < 0.5 | Insufficient evidence | ❌ |
+
+**Both ΔAIC and ΔBIC are calculated and evaluated independently**
 
 **Why ΔAIC matters**:
 - Balances fit quality with model complexity
@@ -312,14 +337,18 @@ def calculate_delta_aic(T, F, Tm_linear, popt_tsb, F_fit_tsb):
 
 ---
 
-##### **B4. Tm Uncertainty**
+##### **B4. Tm Uncertainty** ⭐ **[STRICTER THRESHOLDS]**
 
 | Tm Error (°C) | Quality | Flag |
 |---------------|---------|------|
-| < 0.5 | Excellent | ✅ |
-| 0.5 - 1.0 | Good | ✅ |
-| 1.0 - 2.0 | Marginal | ⚠️ |
-| > 2.0 | Poor | ❌ |
+| < 0.3 | Excellent | ✅ |
+| 0.3 - 1.0 | Acceptable | ⚠️ |
+| > 1.0 | Poor | ❌ |
+
+**Rationale for Stricter Thresholds**:
+- Even "garbage" data rarely exceeds 1.0°C error
+- Tighter thresholds encourage high-quality measurements
+- 0.3°C reflects best-practice expectations
 
 **Calculation**: Standard error from covariance matrix
 ```
@@ -341,14 +370,19 @@ Same thresholds as TSB:
 | 0.80 - 0.90 | Marginal | ⚠️ |
 | < 0.80 | Poor | ❌ |
 
-##### **C2. Dynamic Range**
+##### **C2. Dynamic Range** ⭐ **[REVISED THRESHOLDS]**
 
 | Dynamic Range | Quality | Flag |
 |---------------|---------|------|
-| > 80% | Excellent | ✅ |
-| 60-80% | Good | ✅ |
-| 40-60% | Marginal | ⚠️ |
-| < 40% | Poor | ❌ |
+| ≥ 60% | Excellent | ✅ |
+| 30-60% | Acceptable | ⚠️ |
+| < 30% | Poor | ❌ |
+
+**Rationale for Three-Tier System**:
+- Simplified from 4 tiers to 3 tiers
+- < 30%: Data quality insufficient for reliable analysis
+- 30-60%: Usable but suboptimal
+- ≥ 60%: High-quality signal
 
 **Calculation**:
 ```
@@ -360,14 +394,19 @@ Dynamic Range = (P_max - P_min) / P_max × 100%
 
 #### **D. First Derivative (FD) Specific Metrics**
 
-##### **D1. Peak SNR**
+##### **D1. Peak SNR** ⭐ **[REVISED THRESHOLDS]**
 
 | Peak SNR | Quality | Flag |
 |----------|---------|------|
-| ≥ 5.0 | Excellent | ✅ |
-| 3.0 - 5.0 | Good | ✅ |
-| 2.0 - 3.0 | Marginal | ⚠️ |
-| < 2.0 | Poor | ❌ |
+| ≥ 10.0 | Excellent | ✅ |
+| 3.0 - 10.0 | Acceptable | ⚠️ |
+| < 3.0 | Poor | ❌ |
+
+**Rationale for Three-Tier System**:
+- Matches State SNR thresholds for consistency
+- < 3: Peak not reliably detectable
+- 3-10: Marginal but usable (no "good" tier)
+- ≥ 10: High-quality peak
 
 **Calculation**:
 ```
@@ -392,58 +431,75 @@ Peak SNR = (Peak_height - Baseline_mean) / Baseline_std
 
 ---
 
-### 3.3 Overall Quality Flag (Tab 1)
+### 3.3 Overall Quality Flag (Tab 1) ⭐ **[V2: INDIVIDUAL FLAGS + VOTING]**
 
-**Flag Assignment Logic**:
+**New Approach**: Each QC metric gets independent flag, then overall flag computed by voting rules.
+
+#### **Individual Flag Assignment**
+
+Each metric independently evaluated:
+- **TSB**: `r_squared`, `state_snr`, `delta_aic`, `delta_bic`, `tm_error`
+- **AUC**: `r_squared`, `dynamic_range`
+- **FD**: `peak_snr`
+
+All methods: `data_points`, `tm_found` (critical checks)
+
+#### **Overall Flag Voting Rules**
 
 ```python
-def assign_tab1_quality_flag(metrics, method):
+def compute_overall_flag(individual_flags: Dict[str, str]) -> str:
     """
-    Assign overall quality flag for Tab 1
+    Compute overall flag from individual metric flags
+
+    Rules:
+    1. Any red flag (❌) → Overall ❌ (one-vote veto)
+    2. No red, yellow ≥ green → Overall ⚠️
+    3. Otherwise → Overall ✅
 
     Args:
-        metrics: Dict of all QC metrics
-        method: 'boltzmann', 'auc', or 'derivative'
+        individual_flags: Dict mapping metric name to flag
 
     Returns:
-        flag: '✅', '⚠️', or '❌'
+        overall_flag: '✅', '⚠️', or '❌'
     """
-    # Check critical failures
-    if metrics['n_valid'] < 10:
+    flags = list(individual_flags.values())
+
+    n_red = flags.count('❌')
+    n_yellow = flags.count('⚠️')
+    n_green = flags.count('✅')
+
+    # Rule 1: Any red → Overall red (one-vote veto)
+    if n_red > 0:
         return '❌'
 
-    if np.isnan(metrics['tm']):
-        return '❌'
+    # Rule 2: No red, yellow ≥ green → Overall yellow
+    if n_yellow >= n_green:
+        return '⚠️'
 
-    # Method-specific checks
-    if method == 'boltzmann':
-        if metrics['r_squared'] < 0.80:
-            return '❌'
-        elif metrics['r_squared'] < 0.90:
-            return '⚠️'
-        elif metrics.get('state_snr', float('inf')) < 3.0:
-            return '⚠️'
-        else:
-            return '✅'
-
-    elif method == 'auc':
-        if metrics['r_squared'] < 0.80:
-            return '❌'
-        elif metrics['r_squared'] < 0.90:
-            return '⚠️'
-        else:
-            return '✅'
-
-    elif method == 'derivative':
-        if metrics['peak_snr'] < 2.0:
-            return '❌'
-        elif metrics['peak_snr'] < 3.0:
-            return '⚠️'
-        else:
-            return '✅'
-
-    return '⚠️'  # Default
+    # Rule 3: Otherwise → Overall green
+    return '✅'
 ```
+
+#### **Tooltip Display**
+
+**Always show all individual flags**, even when overall is green:
+
+```
+Example Tooltip (Overall ✅, but has yellow flags):
+
+✅ Data Points: 85
+✅ Tm Found: Yes
+✅ R²: 0.997
+⚠️ State SNR: 6.8
+✅ ΔAIC: 1.23
+✅ ΔBIC: 1.15
+✅ Tm Error: ±0.25°C
+```
+
+**Benefits**:
+- Full transparency: users see all QC details
+- Yellow flags visible even when overall passes
+- Encourages critical data review
 
 ---
 
@@ -657,7 +713,9 @@ Tab 3 QC evaluates the quality of 4-parameter logistic (4PL) fits for EC₅₀ d
 
 ---
 
-##### **A2. Dynamic Range**
+##### **A2. Dynamic Range (Theoretical)** ⭐ **[REVISED THRESHOLDS]**
+
+**Definition**: Theoretical range based on fitted top and bottom plateaus
 
 ```
 Dynamic Range = (Top - Bottom) / Top × 100%
@@ -665,14 +723,38 @@ Dynamic Range = (Top - Bottom) / Top × 100%
 
 | Dynamic Range | Quality | Flag |
 |---------------|---------|------|
-| > 60% | Excellent | ✅ |
-| 40-60% | Good | ✅ |
-| 20-40% | Marginal | ⚠️ |
-| < 20% | Poor | ❌ |
+| ≥ 60% | Excellent | ✅ |
+| 30-60% | Acceptable | ⚠️ |
+| < 30% | Poor | ❌ |
+
+**Rationale**:
+- Three-tier system matches AUC dynamic range
+- < 30%: EC₅₀ very poorly defined
+- ≥ 60%: Well-defined dose-response curve
+
+---
+
+##### **A2b. Data Coverage (Actual)** ⭐ **[NEW METRIC]**
+
+**Definition**: Actual experimental data coverage of theoretical dynamic range
+
+```
+Data Coverage = (max(responses) - min(responses)) / Top × 100%
+```
+
+| Data Coverage | Quality | Flag |
+|---------------|---------|------|
+| ≥ 60% | Excellent | ✅ |
+| 30-60% | Acceptable | ⚠️ |
+| < 30% | Poor | ❌ |
 
 **Why it matters**:
-- Low dynamic range → EC₅₀ poorly defined
-- Weak ligand response → Consider higher concentrations
+- Data Coverage evaluates **experimental design quality**
+- Dynamic Range evaluates **fitted curve quality**
+- Low Data Coverage → Need wider concentration range
+- Example: Fitted Top=100, Bottom=10, but actual data only spans 40-80
+  - Dynamic Range = 90% (excellent by fit)
+  - Data Coverage = 40% (marginal - didn't reach true plateaus)
 
 ---
 
