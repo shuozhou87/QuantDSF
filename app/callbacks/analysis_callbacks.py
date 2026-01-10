@@ -19,6 +19,8 @@ from functools import partial
 from core.io.parsers import parse_zip_file
 from core.analysis.tm import calc_tm_auc, fit_boltzmann_model
 from core.database import HistoryRepository
+from core.qc import TmQualityController
+from core.qc.data_integrity import check_data_integrity
 
 
 def _process_single_sample(args):
@@ -36,25 +38,67 @@ def _process_single_sample(args):
     T = cap['T']
     F = cap['F']
 
+    # Data integrity check
+    is_valid, reason_code = check_data_integrity(T, F, min_points=20)
+    if not is_valid:
+        return {
+            'name': cap['name'],
+            'concentration': cap.get('concentration'),
+            'tm': None,
+            'r_squared': None,
+            'method': method,
+            'quality_flag': '❌',
+            'qc_score': 0.0,
+            'qc_tooltip': f"Data integrity check failed: {reason_code}",
+            'qc_reason_codes': [reason_code],
+            'individual_flags': {},
+            'T': T.tolist() if isinstance(T, np.ndarray) else T,
+            'F': F.tolist() if isinstance(F, np.ndarray) else F,
+            'progress_curve': None,
+            'progress_temperature': None,
+        }
+
     tm = np.nan
     r2 = 0
+    tm_error = None
     progress_curve = None
     progress_temp = None
+
+    # Additional metrics for QC
+    state_snr = None
+    delta_aic = None
+    log_delta_aic = None
+    delta_bic = None
+    log_delta_bic = None
+    dynamic_range_pct = None
+    peak_snr = None
 
     if method == 'auc':
         from core.analysis.tm import calc_tm_auc
         result = calc_tm_auc(T, F, method='progress')
         tm = result.get('Tm_AUC', np.nan)
+        tm_error = result.get('Tm_error')
         r2 = result.get('hill_r2', result.get('quality_score', 0))
         progress_curve = result.get('progress_curve')
         progress_temp = result.get('temperature_range')
+
+        # Calculate dynamic range from progress curve
+        if progress_curve is not None and len(progress_curve) > 0:
+            prog_arr = np.array(progress_curve)
+            dynamic_range_pct = (prog_arr.max() - prog_arr.min()) * 100.0
 
     elif method == 'boltzmann':
         from core.analysis.tm import fit_boltzmann_model
         result = fit_boltzmann_model(T, F, model='exponential')
         if result and result.get('success'):
             tm = result['Tm']
+            tm_error = result.get('Tm_error')
             r2 = result['R_squared']
+            state_snr = result.get('state_snr')
+            delta_aic = result.get('delta_aic')
+            log_delta_aic = result.get('log_delta_aic')
+            delta_bic = result.get('delta_bic')
+            log_delta_bic = result.get('log_delta_bic')
         else:
             tm = np.nan
             r2 = 0
@@ -67,36 +111,69 @@ def _process_single_sample(args):
         peaks = find_derivative_peaks(T_deriv, deriv)
         tm = peaks[0][0] if peaks else np.nan
 
-        # Calculate SNR
+        # Calculate Peak SNR
         if peaks and len(peaks) > 0:
             peak_height = abs(peaks[0][1])
             n_baseline = max(10, int(len(T_deriv) * 0.1))
             baseline_region = deriv[:n_baseline]
             noise_std = np.std(baseline_region)
-            r2 = peak_height / noise_std if noise_std > 0 else 0
+            peak_snr = peak_height / noise_std if noise_std > 0 else 0
+            r2 = peak_snr  # For backward compatibility
         else:
+            peak_snr = 0
             r2 = 0
 
         progress_curve = deriv.tolist() if isinstance(deriv, np.ndarray) else deriv
         progress_temp = T_deriv.tolist() if isinstance(T_deriv, np.ndarray) else T_deriv
 
-    # Determine quality flag
-    if np.isnan(tm):
-        quality = "❌"
-    elif method == 'derivative':
-        quality = "✓" if r2 >= 3.0 else "⚠️"
-    elif r2 < 0.9:
-        quality = "⚠️"
-    else:
-        quality = "✓"
+    # Run QC evaluation using TmQualityController
+    from core.qc import TmQualityController
+    from core.qc.config import QCSettings
+
+    # Create TmResult dict for QC evaluation
+    tm_result_dict = {
+        'method': method,
+        'Tm': tm,
+        'Tm_error': tm_error,
+        'R_squared': r2,
+        'state_snr': state_snr,
+        'log_delta_aic': log_delta_aic,
+        'log_delta_bic': log_delta_bic,
+        'dynamic_range_pct': dynamic_range_pct,
+        'peak_snr': peak_snr,
+        'T': T,
+        'F': F,
+        'progress_curve': progress_curve,
+        'progress_temperature': progress_temp,
+    }
+
+    qc_controller = TmQualityController(settings=QCSettings())
+    qc_metrics = qc_controller.evaluate(tm_result_dict)
+
+    # Use QC results
+    quality_flag = qc_metrics.flag
+    qc_score = qc_metrics.score
+    qc_tooltip = qc_metrics.tooltip
+    qc_reason_codes = qc_metrics.reason_codes
+    individual_flags = qc_metrics.details.get('individual_flags', {})
 
     return {
         'name': cap['name'],
         'concentration': cap.get('concentration'),
         'tm': float(tm) if not np.isnan(tm) else None,
+        'tm_error': float(tm_error) if tm_error is not None and not np.isnan(tm_error) else None,
         'r_squared': float(r2) if r2 else None,
         'method': method,
-        'quality_flag': quality,
+        'quality_flag': quality_flag,
+        'qc_score': qc_score,
+        'qc_tooltip': qc_tooltip,
+        'qc_reason_codes': qc_reason_codes,
+        'individual_flags': individual_flags,
+        'state_snr': float(state_snr) if state_snr is not None else None,
+        'log_delta_aic': float(log_delta_aic) if log_delta_aic is not None else None,
+        'log_delta_bic': float(log_delta_bic) if log_delta_bic is not None else None,
+        'dynamic_range_pct': float(dynamic_range_pct) if dynamic_range_pct is not None else None,
+        'peak_snr': float(peak_snr) if peak_snr is not None else None,
         'T': T.tolist() if isinstance(T, np.ndarray) else T,
         'F': F.tolist() if isinstance(F, np.ndarray) else F,
         'progress_curve': progress_curve if progress_curve is not None and not isinstance(progress_curve, np.ndarray) else (progress_curve.tolist() if progress_curve is not None else None),
@@ -569,20 +646,23 @@ def _create_results_table(results: list):
         else:
             r2_str = f"{r['r_squared']:.3f}" if r['r_squared'] is not None else 'N/A'
 
-        # 生成Status的tooltip（悬停提示）
-        status_tooltip = r['quality_flag']
-        if r['quality_flag'] == '⚠️':
-            # 警告状态：显示具体原因
-            if r['method'] == 'derivative':
-                # First Derivative方法使用SNR
-                snr_threshold = 3.0
-                status_tooltip = f"Low SNR: {r['r_squared']:.1f} (threshold: {snr_threshold})"
-            else:
-                # 其他方法使用R²
-                r2_threshold = 0.90
-                status_tooltip = f"Low R²: {r['r_squared']:.3f} (threshold: {r2_threshold:.2f})"
-        elif r['quality_flag'] == '❌':
-            status_tooltip = "Analysis failed or Tm not found"
+        # 生成Status的tooltip（悬停提示）- 使用新的QC系统
+        status_tooltip = r.get('qc_tooltip')
+        if not status_tooltip:
+            # Fallback to old logic if QC tooltip not available
+            status_tooltip = r['quality_flag']
+            if r['quality_flag'] == '⚠️':
+                # 警告状态：显示具体原因
+                if r['method'] == 'derivative':
+                    # First Derivative方法使用SNR
+                    snr_threshold = 3.0
+                    status_tooltip = f"Low SNR: {r['r_squared']:.1f} (threshold: {snr_threshold})"
+                else:
+                    # 其他方法使用R²
+                    r2_threshold = 0.90
+                    status_tooltip = f"Low R²: {r['r_squared']:.3f} (threshold: {r2_threshold:.2f})"
+            elif r['quality_flag'] == '❌':
+                status_tooltip = "Analysis failed or Tm not found"
 
         row_data = {
             'index': i,

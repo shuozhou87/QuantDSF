@@ -11,6 +11,8 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import numpy as np
 from core.analysis.dose_response_ec50 import fit_tm_ec50, hill4_tm
+from core.qc import DoseResponseQualityController
+from core.qc.config import QCSettings
 
 
 def register_dose_response_callbacks(app: Dash) -> None:
@@ -145,6 +147,33 @@ def register_dose_response_callbacks(app: Dash) -> None:
             return html.Div([
                 dbc.Alert("EC50 fitting failed. Check data quality and concentration range.", color="danger")
             ]), fig
+
+        # Run QC evaluation for dose-response analysis
+        bottom = fit_result['bottom']
+        top = fit_result['top']
+        dynamic_range_pct = (abs(top - bottom) / max(abs(top), abs(bottom))) * 100.0 if max(abs(top), abs(bottom)) > 0 else 0.0
+
+        # Calculate data coverage (actual experimental coverage)
+        response_range = tm_values.max() - tm_values.min()
+        data_coverage_pct = (response_range / max(abs(top), abs(bottom))) * 100.0 if max(abs(top), abs(bottom)) > 0 else 0.0
+
+        dr_result_dict = {
+            'ec50': fit_result['ec50'],
+            'r2': fit_result['r2'],
+            'hill_slope': fit_result['hill_slope'],
+            'bottom': bottom,
+            'top': top,
+            'n_points': len(concentrations),
+            'concentration_range': [concentrations.min(), concentrations.max()],
+            'dynamic_range_pct': dynamic_range_pct,
+            'data_coverage_pct': data_coverage_pct,
+        }
+
+        qc_controller = DoseResponseQualityController(settings=QCSettings())
+        qc_metrics = qc_controller.evaluate(dr_result_dict)
+
+        # Note: QC results are computed but not currently displayed in Tab 3 UI
+        # Could be added to the results display in future enhancement
 
         # Create dose-response plot
         # Data points

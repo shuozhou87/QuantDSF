@@ -13,6 +13,8 @@ import numpy as np
 import re
 from typing import List
 from core.analysis.thermodynamic.ec50_kd import convert_ec50_to_kd
+from core.qc import ThermodynamicQualityController
+from core.qc.config import QCSettings
 
 
 def register_thermo_callbacks(app: Dash) -> None:
@@ -368,7 +370,26 @@ def register_thermo_callbacks(app: Dash) -> None:
                     yaxis_title='ln(KD)',
                     legend=dict(orientation='h', yanchor='bottom', y=1.02)
                 )
-                
+
+                # Run QC evaluation for thermodynamic analysis
+                thermo_result_dict = {
+                    'deltaH': delta_h,
+                    'deltaS': delta_s,
+                    'r2': r2,
+                    'n_points': len(kd_values),
+                    'n_slices': len(temperatures_c),
+                    'T_window_start': temperatures_c.min() if len(temperatures_c) > 0 else None,
+                    'T_window_end': temperatures_c.max() if len(temperatures_c) > 0 else None,
+                    # Would need T_array, F_array, Tm for onset/offset detection
+                    # These are not directly available here; could be added if needed
+                }
+
+                qc_controller = ThermodynamicQualityController(settings=QCSettings())
+                qc_metrics = qc_controller.evaluate(thermo_result_dict)
+
+                # Note: QC results are computed but not currently displayed in Tab 2 UI
+                # Could be added to the UI in future enhancement
+
                 return (
                     fig,
                     f"{delta_h_conv:.1f} {delta_h_unit}",
