@@ -80,25 +80,38 @@ class TmQualityController(QualityController):
             tooltip=tooltip
         )
 
-    def get_metrics(self, tm_result: TmResult) -> Dict[str, Any]:
+    def get_metrics(self, tm_result) -> Dict[str, Any]:
         """
         计算所有QC指标
 
         Args:
-            tm_result: Tm分析结果
+            tm_result: Tm分析结果 (TmResult对象或字典)
 
         Returns:
             指标字典
         """
-        method = tm_result.method.value
+        # Support both TmResult objects and dicts
+        if isinstance(tm_result, dict):
+            method = tm_result.get('method')
+            tm = tm_result.get('Tm')
+            r_squared = tm_result.get('R_squared', 0.0)
+            T = tm_result.get('T', [])
+            n_points = len(T) if T is not None else 0
+            t_range = np.ptp(T) if T is not None and len(T) > 0 else 0.0
+        else:
+            method = tm_result.method.value
+            tm = tm_result.Tm
+            r_squared = tm_result.R_squared if not np.isnan(tm_result.R_squared) else 0.0
+            n_points = len(tm_result.raw_data.T) if tm_result.raw_data else 0
+            t_range = tm_result.raw_data.T.ptp() if tm_result.raw_data else 0.0
 
         # Universal metrics
         metrics = {
             'method': method,
-            'tm': tm_result.tm,
-            'r_squared': tm_result.r_squared if not np.isnan(tm_result.r_squared) else 0.0,
-            'n_points': len(tm_result.raw_data.T) if tm_result.raw_data else 0,
-            't_range': tm_result.raw_data.T.ptp() if tm_result.raw_data else 0.0,
+            'tm': tm,
+            'r_squared': r_squared if not np.isnan(r_squared) else 0.0,
+            'n_points': n_points,
+            't_range': t_range,
         }
 
         # Method-specific metrics
@@ -111,31 +124,52 @@ class TmQualityController(QualityController):
 
         return metrics
 
-    def _get_tsb_metrics(self, tm_result: TmResult) -> Dict[str, Any]:
+    def _get_tsb_metrics(self, tm_result) -> Dict[str, Any]:
         """获取TSB特定指标"""
-        metrics = {
-            'state_snr': tm_result.state_snr if hasattr(tm_result, 'state_snr') and tm_result.state_snr is not None else float('nan'),
-            'delta_aic': tm_result.delta_aic if hasattr(tm_result, 'delta_aic') and tm_result.delta_aic is not None else 0.0,
-            'log_delta_aic': tm_result.log_delta_aic if hasattr(tm_result, 'log_delta_aic') and tm_result.log_delta_aic is not None else 0.0,
-            'delta_bic': tm_result.delta_bic if hasattr(tm_result, 'delta_bic') and tm_result.delta_bic is not None else 0.0,
-            'log_delta_bic': tm_result.log_delta_bic if hasattr(tm_result, 'log_delta_bic') and tm_result.log_delta_bic is not None else 0.0,
-            'tm_error': tm_result.tm_error if tm_result.tm_error is not None else float('inf'),
-        }
+        if isinstance(tm_result, dict):
+            metrics = {
+                'state_snr': tm_result.get('state_snr', float('nan')),
+                'delta_aic': tm_result.get('delta_aic', 0.0),
+                'log_delta_aic': tm_result.get('log_delta_aic', 0.0),
+                'delta_bic': tm_result.get('delta_bic', 0.0),
+                'log_delta_bic': tm_result.get('log_delta_bic', 0.0),
+                'tm_error': tm_result.get('Tm_error', float('inf')),
+            }
+        else:
+            metrics = {
+                'state_snr': tm_result.state_snr if hasattr(tm_result, 'state_snr') and tm_result.state_snr is not None else float('nan'),
+                'delta_aic': tm_result.delta_aic if hasattr(tm_result, 'delta_aic') and tm_result.delta_aic is not None else 0.0,
+                'log_delta_aic': tm_result.log_delta_aic if hasattr(tm_result, 'log_delta_aic') and tm_result.log_delta_aic is not None else 0.0,
+                'delta_bic': tm_result.delta_bic if hasattr(tm_result, 'delta_bic') and tm_result.delta_bic is not None else 0.0,
+                'log_delta_bic': tm_result.log_delta_bic if hasattr(tm_result, 'log_delta_bic') and tm_result.log_delta_bic is not None else 0.0,
+                'tm_error': tm_result.tm_error if tm_result.tm_error is not None else float('inf'),
+            }
         return metrics
 
-    def _get_auc_metrics(self, tm_result: TmResult) -> Dict[str, Any]:
+    def _get_auc_metrics(self, tm_result) -> Dict[str, Any]:
         """获取AUC特定指标"""
-        metrics = {
-            'dynamic_range': tm_result.dynamic_range if hasattr(tm_result, 'dynamic_range') else None,
-        }
+        if isinstance(tm_result, dict):
+            metrics = {
+                'dynamic_range': tm_result.get('dynamic_range_pct'),
+            }
+        else:
+            metrics = {
+                'dynamic_range': tm_result.dynamic_range if hasattr(tm_result, 'dynamic_range') else None,
+            }
         return metrics
 
-    def _get_fd_metrics(self, tm_result: TmResult) -> Dict[str, Any]:
+    def _get_fd_metrics(self, tm_result) -> Dict[str, Any]:
         """获取FD特定指标"""
-        metrics = {
-            'peak_snr': tm_result.snr if tm_result.snr is not None else 0.0,
-            'peak_width': tm_result.peak_width if hasattr(tm_result, 'peak_width') and tm_result.peak_width is not None else None,
-        }
+        if isinstance(tm_result, dict):
+            metrics = {
+                'peak_snr': tm_result.get('peak_snr', 0.0),
+                'peak_width': tm_result.get('peak_width'),
+            }
+        else:
+            metrics = {
+                'peak_snr': tm_result.snr if tm_result.snr is not None else 0.0,
+                'peak_width': tm_result.peak_width if hasattr(tm_result, 'peak_width') and tm_result.peak_width is not None else None,
+            }
         return metrics
 
     def _evaluate_individual_flags(
