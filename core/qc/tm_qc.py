@@ -40,12 +40,12 @@ class TmQualityController(QualityController):
         """
         self.settings = settings or default_qc_settings
 
-    def evaluate(self, tm_result: TmResult) -> QualityMetrics:
+    def evaluate(self, tm_result) -> QualityMetrics:
         """
         评估Tm结果质量
 
         Args:
-            tm_result: Tm分析结果
+            tm_result: Tm分析结果 (TmResult对象或字典)
 
         Returns:
             QualityMetrics对象
@@ -53,14 +53,20 @@ class TmQualityController(QualityController):
         # 计算所有QC指标
         metrics = self.get_metrics(tm_result)
 
+        # 获取method (支持dict和对象)
+        if isinstance(tm_result, dict):
+            method = tm_result.get('method')
+        else:
+            method = tm_result.method.value
+
         # 计算每个指标的flag
-        individual_flags = self._evaluate_individual_flags(metrics, tm_result.method.value)
+        individual_flags = self._evaluate_individual_flags(metrics, method)
 
         # 应用overall逻辑
         overall_flag = self._compute_overall_flag(individual_flags)
 
         # 计算质量分数
-        score = self._calculate_score(metrics, tm_result.method.value)
+        score = self._calculate_score(metrics, method)
 
         # 生成消息
         message = self._generate_message(individual_flags, overall_flag)
