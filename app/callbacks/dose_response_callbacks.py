@@ -239,6 +239,18 @@ def register_dose_response_callbacks(app: Dash) -> None:
 
         ci_str = f"{fit_result['ec50_ci'][0]:.2e} - {fit_result['ec50_ci'][1]:.2e} M"
 
+        # Format QC flag with color
+        qc_flag = qc_metrics.flag
+        if qc_flag == '✅':
+            qc_color = 'success'
+            qc_badge_color = 'success'
+        elif qc_flag == '⚠️':
+            qc_color = 'warning'
+            qc_badge_color = 'warning'
+        else:
+            qc_color = 'danger'
+            qc_badge_color = 'danger'
+
         results_display = html.Div([
             dbc.Alert("✅ EC50 Analysis Complete", color="success", className="mb-3"),
 
@@ -271,6 +283,21 @@ def register_dose_response_callbacks(app: Dash) -> None:
 
             html.Hr(),
 
+            # QC Summary
+            dbc.Alert([
+                html.Div([
+                    html.Span("Quality: ", className="fw-bold"),
+                    dbc.Badge(qc_flag, color=qc_badge_color, className="me-2"),
+                    html.Span(f"Score: {qc_metrics.score:.1f}/100", className="text-muted small")
+                ]),
+                html.Div([
+                    html.Small(qc_metrics.message, className="text-muted")
+                ], className="mt-1") if qc_metrics.message else None,
+                html.Div([
+                    html.Small(qc_metrics.tooltip, className="mt-2 d-block")
+                ]) if qc_metrics.tooltip else None
+            ], color=qc_color, className="mb-3"),
+
             html.H6("Fitting Parameters", className="mt-3 mb-2"),
             dbc.Table([
                 html.Thead([
@@ -295,6 +322,14 @@ def register_dose_response_callbacks(app: Dash) -> None:
                     html.Tr([
                         html.Td("Data Points"),
                         html.Td(f"{len(concentrations)}")
+                    ]),
+                    html.Tr([
+                        html.Td("Dynamic Range"),
+                        html.Td(f"{dynamic_range_pct:.1f}%")
+                    ]),
+                    html.Tr([
+                        html.Td("Data Coverage"),
+                        html.Td(f"{data_coverage_pct:.1f}%")
                     ])
                 ])
             ], bordered=True, hover=True, size='sm', className="mb-3")
