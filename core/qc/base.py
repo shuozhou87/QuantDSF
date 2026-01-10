@@ -8,7 +8,7 @@ QC模块的基础类和接口
 
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Literal, Optional
+from typing import Dict, Any, Literal, Optional, List
 
 
 class QualityMetrics(BaseModel):
@@ -44,6 +44,11 @@ class QualityMetrics(BaseModel):
     tooltip: Optional[str] = Field(
         None,
         description="悬停提示文本"
+    )
+
+    reason_codes: List[str] = Field(
+        default_factory=list,
+        description="标准化的QC原因代码列表 (machine-readable)"
     )
 
 

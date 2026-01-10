@@ -13,11 +13,20 @@ Tab 2: Thermodynamic Quality Control
 """
 
 import numpy as np
-from typing import Dict, Any, Literal
+from typing import Dict, Any, Literal, List, Optional
 from pydantic import BaseModel
 
 from .base import QualityMetrics, QualityController
 from .config import default_qc_settings, QCSettings
+from .transition_bounds import detect_transition_bounds, validate_window_in_transition
+from .reason_codes import (
+    INSUFFICIENT_SLICING_POINTS,
+    WINDOW_OUTSIDE_TRANSITION,
+    INSUFFICIENT_CONCENTRATION_RANGE,
+    LOW_VH_FIT_QUALITY,
+    THERMODYNAMIC_PARAMETER_OUT_OF_RANGE,
+    EXTRAPOLATED_KD,
+)
 
 
 class ThermodynamicQualityController(QualityController):
@@ -51,6 +60,9 @@ class ThermodynamicQualityController(QualityController):
         # 分配质量标志
         flag = self._assign_flag_from_metrics(metrics)
 
+        # 生成原因代码
+        reason_codes = self._generate_reason_codes(metrics, flag)
+
         # 生成消息
         message = self._generate_message(metrics, flag)
 
@@ -63,7 +75,8 @@ class ThermodynamicQualityController(QualityController):
             score=score,
             message=message,
             details=metrics,
-            tooltip=tooltip
+            tooltip=tooltip,
+            reason_codes=reason_codes
         )
 
     def get_metrics(self, thermo_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -85,6 +98,15 @@ class ThermodynamicQualityController(QualityController):
                 - T_min: 最小温度 (K)
                 - T_max: 最大温度 (K)
 
+                可选字段 (v0.9新增):
+                - n_slices: 温度切片数量
+                - T_window_start: 窗口起始温度 (°C)
+                - T_window_end: 窗口结束温度 (°C)
+                - Tm: Melting temperature for transition bounds (°C)
+                - T_array: Temperature array for onset/offset detection (°C)
+                - F_array: Fluorescence array for onset/offset detection
+                - dynamic_range: 窗口内动态范围 (%)
+
         Returns:
             指标字典
         """
@@ -92,6 +114,30 @@ class ThermodynamicQualityController(QualityController):
         vh_r2 = thermo_result.get('vh_r2', 0.0)
         vh_n_points = thermo_result.get('vh_n_points', 0)
         delta_T = thermo_result.get('delta_T', 0.0)
+
+        # v0.9 additions: Slicing and window validation
+        n_slices = thermo_result.get('n_slices', vh_n_points)  # Default to n_points
+        T_window_start = thermo_result.get('T_window_start')
+        T_window_end = thermo_result.get('T_window_end')
+        Tm = thermo_result.get('Tm')
+        T_array = thermo_result.get('T_array')
+        F_array = thermo_result.get('F_array')
+        dynamic_range = thermo_result.get('dynamic_range')
+
+        # Detect transition bounds if data available
+        onset, offset = None, None
+        window_valid = True  # Assume valid unless proven otherwise
+
+        if Tm is not None and T_array is not None and F_array is not None:
+            onset, offset = detect_transition_bounds(
+                T_array, F_array, Tm, method='derivative'
+            )
+
+            # Validate window placement
+            if T_window_start is not None and T_window_end is not None and onset is not None and offset is not None:
+                window_valid = validate_window_in_transition(
+                    T_window_start, T_window_end, onset, offset, tolerance=5.0
+                )
 
         # Thermodynamic parameters
         dH = thermo_result.get('dH', 0.0)
@@ -128,6 +174,13 @@ class ThermodynamicQualityController(QualityController):
             'vh_r2': vh_r2,
             'vh_n_points': vh_n_points,
             'delta_T': delta_T,
+
+            # v0.9 additions
+            'n_slices': n_slices,
+            'onset': onset,
+            'offset': offset,
+            'window_valid': window_valid,
+            'dynamic_range': dynamic_range,
 
             # Parameter uncertainty
             'dH': dH,
@@ -339,7 +392,7 @@ class ThermodynamicQualityController(QualityController):
         metrics: Dict[str, Any]
     ) -> Literal['✅', '⚠️', '❌']:
         """
-        根据指标分配质量标志
+        根据指标分配质量标志 (updated with v0.9 requirements)
 
         Args:
             metrics: QC指标字典
@@ -353,7 +406,25 @@ class ThermodynamicQualityController(QualityController):
         dH_plausible = metrics['dH_plausible']
         dS_plausible = metrics['dS_plausible']
 
-        # Critical failures
+        # v0.9 additions
+        n_slices = metrics.get('n_slices', n_points)
+        window_valid = metrics.get('window_valid', True)
+        dynamic_range = metrics.get('dynamic_range')
+
+        # Critical failures (v0.9 MANDATORY criteria)
+        # v0.9: Minimum slicing points N >= 5
+        if n_slices < 5:
+            return '❌'
+
+        # v0.9: Window must be inside transition region
+        if not window_valid:
+            return '❌'
+
+        # v0.9: Dynamic range >= 30% (if available)
+        if dynamic_range is not None and dynamic_range < 30.0:
+            return '❌'
+
+        # Existing critical failures
         if r2 < self.settings.thermo_r2_marginal:
             return '❌'
 
@@ -371,6 +442,10 @@ class ThermodynamicQualityController(QualityController):
             return '⚠️'
 
         if n_points < self.settings.thermo_min_points_excellent:
+            return '⚠️'
+
+        # v0.9: Dynamic range 30-60% is marginal
+        if dynamic_range is not None and 30.0 <= dynamic_range < 60.0:
             return '⚠️'
 
         # Pass
@@ -476,3 +551,54 @@ class ThermodynamicQualityController(QualityController):
         else:  # ❌
             # Fail: Show failure reason
             return self._generate_message(metrics, flag)
+
+    def _generate_reason_codes(
+        self,
+        metrics: Dict[str, Any],
+        flag: Literal['✅', '⚠️', '❌']
+    ) -> List[str]:
+        """
+        生成标准化原因代码
+
+        Args:
+            metrics: QC指标字典
+            flag: 质量标志
+
+        Returns:
+            原因代码列表
+        """
+        codes = []
+
+        # v0.9: Insufficient slicing points
+        n_slices = metrics.get('n_slices', 0)
+        if n_slices < 5:
+            codes.append(INSUFFICIENT_SLICING_POINTS.code)
+
+        # v0.9: Window outside transition
+        window_valid = metrics.get('window_valid', True)
+        if not window_valid:
+            codes.append(WINDOW_OUTSIDE_TRANSITION.code)
+
+        # v0.9: Insufficient concentration range (proxy: delta_T)
+        delta_T = metrics.get('delta_T', 0.0)
+        if delta_T < self.settings.thermo_min_delta_T_good:
+            codes.append(INSUFFICIENT_CONCENTRATION_RANGE.code)
+
+        # Low Van't Hoff fit quality
+        vh_r2 = metrics.get('vh_r2', 0.0)
+        if vh_r2 < self.settings.thermo_r2_marginal:
+            codes.append(LOW_VH_FIT_QUALITY.code)
+
+        # Thermodynamic parameters out of range
+        dH_plausible = metrics.get('dH_plausible', True)
+        dS_plausible = metrics.get('dS_plausible', True)
+        if not dH_plausible or not dS_plausible:
+            codes.append(THERMODYNAMIC_PARAMETER_OUT_OF_RANGE.code)
+
+        # Extrapolated KD
+        extrap_298 = metrics.get('extrap_298', 0.0)
+        extrap_310 = metrics.get('extrap_310', 0.0)
+        if extrap_298 > 0.0 or extrap_310 > 0.0:
+            codes.append(EXTRAPOLATED_KD.code)
+
+        return codes
