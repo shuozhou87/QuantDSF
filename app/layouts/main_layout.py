@@ -119,7 +119,12 @@ def create_main_layout() -> dbc.Container:
         dcc.Store(id='app-state-store', storage_type='memory'),
         dcc.Store(id='config-store', storage_type='memory'),
         dcc.Store(id='analysis-results-store', storage_type='memory'),
-        
+        dcc.Store(id='dose-response-store', storage_type='memory'),
+        dcc.Store(id='thermodynamics-store', storage_type='memory'),
+
+        # 下载组件
+        dcc.Download(id='download-export-package'),
+
         # 导航栏
         create_navbar(),
         

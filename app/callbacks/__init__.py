@@ -21,6 +21,7 @@ def register_all_callbacks(app: Dash) -> None:
     from .analysis_callbacks import register_analysis_callbacks, register_loading_message_callback
     from .thermo_callbacks import register_thermo_callbacks
     from .dose_response_callbacks import register_dose_response_callbacks
+    from .export_callbacks import register_export_callbacks
 
     register_file_callbacks(app)
     register_tab_callbacks(app)
@@ -28,6 +29,7 @@ def register_all_callbacks(app: Dash) -> None:
     register_loading_message_callback(app)  # 加载状态消息
     register_thermo_callbacks(app)
     register_dose_response_callbacks(app)
+    register_export_callbacks(app)  # 导出功能
 
 
 __all__ = ['register_all_callbacks']

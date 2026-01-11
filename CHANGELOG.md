@@ -9,6 +9,36 @@
 ## [Unreleased] - 2026-01-10
 
 ### Added
+- **Complete Export Package Feature**: 一键导出所有分析结果和图表为ZIP包
+  - **ZIP包内容**:
+    - `QuantDSF_Results.xlsx`: 4-sheet Excel工作簿（Basic_Analysis, Dose_Response, Thermodynamics, Analysis_Settings）
+    - 所有非空图表导出为300 DPI PNG（最多6张图）
+  - **Excel功能**:
+    - 专业格式化：蓝色标题行、冻结窗格、自动列宽
+    - 数字格式化：浓度科学计数法、Tm保留1位小数、R²保留3位小数
+    - QC条件格式：✅绿色、⚠️黄色、❌红色背景
+    - 智能占位符：未运行的分析显示提示性说明
+  - **数据存储基础设施**:
+    - 新增 `dose-response-store` 和 `thermodynamics-store` 缓存分析结果
+    - 修改回调函数自动保存EC50和Van't Hoff结果
+  - **核心导出模块**:
+    - `core/io/exporters/figure_exporter.py`: Plotly图表转PNG（kaleido引擎）
+    - `core/io/exporters/excel_exporter.py`: 4-sheet工作簿生成器
+    - `core/io/exporters/complete_exporter.py`: ZIP包编排器
+  - **UI集成**:
+    - 侧边栏"Export Results"按钮
+    - 时间戳文件名（`QuantDSF_Export_YYYYMMDD_HHMMSS.zip`）
+    - 浏览器自动下载
+  - **实现位置**:
+    - 导出器: `core/io/exporters/` (3个新文件, 673行)
+    - UI: `app/layouts/main_layout.py:126`, `app/components/sidebar.py:269-276`
+    - 回调: `app/callbacks/export_callbacks.py` (完全重写)
+    - 存储: `app/callbacks/dose_response_callbacks.py:343-359`, `app/callbacks/thermo_callbacks.py:517-546`
+  - **依赖**: kaleido 1.2.0（Plotly静态图像导出）
+  - **文档**:
+    - [EXPORT_FEATURE_DESIGN.md](docs/EXPORT_FEATURE_DESIGN.md) - 完整设计规范
+    - [EXPORT_IMPLEMENTATION_PROGRESS.md](docs/EXPORT_IMPLEMENTATION_PROGRESS.md) - 实施进度
+
 - **Thermodynamics QC Integration**: 完成Van't Hoff分析的质量控制集成
   - **QC状态卡片**: Van't Hoff图下方显示详细的QC评估（✅/⚠️/❌）
     - Van't Hoff回归质量（R², 数据点数, 温度范围）

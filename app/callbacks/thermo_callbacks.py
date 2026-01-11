@@ -295,6 +295,7 @@ def register_thermo_callbacks(app: Dash) -> None:
         Output('vh-kd-310', 'children'),
         Output('vh-r2', 'children'),
         Output('thermo-qc-status-container', 'children'),
+        Output('thermodynamics-store', 'data'),
         Input('run-vanthoff-btn', 'n_clicks'),
         State('protein-conc-input', 'value'),
         State('vh-method-selector', 'value'),
@@ -323,7 +324,7 @@ def register_thermo_callbacks(app: Dash) -> None:
                 font=dict(size=14, color="gray")
             )
             fig.update_layout(template='plotly_white')
-            return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--", html.Div()
+            return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--", html.Div(), None
 
         # 优先使用等温 EC50/KD 表的数据进行 Van't Hoff（温度-EC50/KD 曲线）
         if iso_table_data:
@@ -387,7 +388,7 @@ def register_thermo_callbacks(app: Dash) -> None:
                 font=dict(size=14, color="gray")
             )
             fig.update_layout(template='plotly_white')
-            return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--", html.Div()
+            return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--", html.Div(), None
 
         try:
             from core.analysis.thermodynamic import vanthoff
@@ -418,7 +419,7 @@ def register_thermo_callbacks(app: Dash) -> None:
                     font=dict(size=14, color="red")
                 )
                 fig.update_layout(template='plotly_white')
-                return fig, "Error", "Error", "Error", "--", "--", html.Div()
+                return fig, "Error", "Error", "Error", "--", "--", html.Div(), None
 
             temperatures_c = temperatures_c[mask_finite]
             kd_values = kd_values[mask_finite]
@@ -513,6 +514,26 @@ def register_thermo_callbacks(app: Dash) -> None:
                 # 创建QC状态卡片（传递units参数）
                 qc_card = _create_qc_status_card(qc_metrics, units=units)
 
+                # Prepare data for storage
+                thermodynamics_data = {
+                    'delta_h': delta_h,  # Store in J/mol (raw)
+                    'delta_s': delta_s,  # Store in J/mol/K (raw)
+                    'delta_h_display': delta_h_conv,  # Display value in user units
+                    'delta_s_display': delta_s_conv,  # Display value in user units
+                    'delta_h_unit': delta_h_unit,
+                    'delta_s_unit': delta_s_unit,
+                    'r2': r2,
+                    'kd_298k': kd_298_raw,
+                    'kd_310k': kd_310_raw,
+                    'n_points': len(kd_values),
+                    'temperatures': temperatures_c.tolist(),
+                    'kd_values': kd_values.tolist(),
+                    'qc_flag': qc_metrics.flag,
+                    'qc_message': qc_metrics.message,
+                    'qc_score': qc_metrics.score,
+                    'units': units  # Store user's unit preference
+                }
+
                 return (
                     fig,
                     f"{delta_h_conv:.1f} {delta_h_unit}",
@@ -520,7 +541,8 @@ def register_thermo_callbacks(app: Dash) -> None:
                     _format_kd(kd_298_raw),
                     _format_kd(kd_310_raw),
                     f"{r2:.4f}",
-                    qc_card
+                    qc_card,
+                    thermodynamics_data
                 )
             else:
                 r2_val = result.get('r2') if result else None
@@ -531,7 +553,7 @@ def register_thermo_callbacks(app: Dash) -> None:
                                    x=0.5, y=0.5, showarrow=False,
                                    font=dict(size=14, color="red"))
                 fig.update_layout(template='plotly_white')
-                return fig, "Error", "Error", "Error", "--", "--", html.Div()
+                return fig, "Error", "Error", "Error", "--", "--", html.Div(), None
 
         except Exception as e:
             fig.add_annotation(

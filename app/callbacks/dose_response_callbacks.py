@@ -66,6 +66,7 @@ def register_dose_response_callbacks(app: Dash) -> None:
     @app.callback(
         Output('dr-ec50-results', 'children'),
         Output('dose-response-plot', 'figure'),
+        Output('dose-response-store', 'data'),
         Input('dr-run-btn', 'n_clicks'),
         State('analysis-results-store', 'data'),
         State('dr-selection-table', 'selected_rows'),
@@ -88,7 +89,7 @@ def register_dose_response_callbacks(app: Dash) -> None:
             )
             return html.Div([
                 dbc.Alert("No data available for analysis.", color="warning")
-            ]), fig
+            ]), fig, None
 
         if not selected_rows or len(selected_rows) < 3:
             fig.add_annotation(
@@ -100,7 +101,7 @@ def register_dose_response_callbacks(app: Dash) -> None:
             )
             return html.Div([
                 dbc.Alert("Please select at least 3 data points with valid concentrations for EC50 fitting.", color="warning")
-            ]), fig
+            ]), fig, None
 
         # Extract selected data
         # selected_rows contains the row indices directly corresponding to the results array
@@ -130,7 +131,7 @@ def register_dose_response_callbacks(app: Dash) -> None:
             )
             return html.Div([
                 dbc.Alert("Insufficient valid data points. Need at least 3 points with valid concentration and Tm.", color="danger")
-            ]), fig
+            ]), fig, None
 
         concentrations = np.array(concentrations)
         tm_values = np.array(tm_values)
@@ -148,7 +149,7 @@ def register_dose_response_callbacks(app: Dash) -> None:
             )
             return html.Div([
                 dbc.Alert("EC50 fitting failed. Check data quality and concentration range.", color="danger")
-            ]), fig
+            ]), fig, None
 
         # Run QC evaluation for dose-response analysis
         bottom = fit_result['bottom']
@@ -339,4 +340,20 @@ def register_dose_response_callbacks(app: Dash) -> None:
             ], bordered=True, hover=True, size='sm', className="mb-3")
         ])
 
-        return results_display, fig
+        # Prepare data for storage
+        dose_response_data = {
+            'ec50': ec50,
+            'ec50_ci': fit_result['ec50_ci'],
+            'r2': fit_result['r2'],
+            'hill_slope': fit_result['hill_slope'],
+            'bottom': bottom,
+            'top': top,
+            'n_points': len(concentrations),
+            'concentrations': concentrations.tolist(),
+            'tm_values': tm_values.tolist(),
+            'qc_flag': qc_metrics.flag,
+            'qc_message': qc_metrics.message,
+            'qc_score': qc_metrics.score
+        }
+
+        return results_display, fig, dose_response_data
