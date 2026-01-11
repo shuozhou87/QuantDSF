@@ -6,7 +6,38 @@
 
 ---
 
-## [Unreleased] - 2026-01-08
+## [Unreleased] - 2026-01-10
+
+### Added
+- **Thermodynamics QC Integration**: 完成Van't Hoff分析的质量控制集成
+  - **QC状态卡片**: Van't Hoff图下方显示详细的QC评估（✅/⚠️/❌）
+    - Van't Hoff回归质量（R², 数据点数, 温度范围）
+    - 参数不确定性（ΔH误差, ΔS误差）
+    - KD可靠性评估（298K/310K，含插值/外推状态）
+    - 物理合理性检查
+    - v0.9新增：温度切片数、窗口位置验证
+  - **位置**: `app/callbacks/tab_callbacks.py:347`, `app/callbacks/thermo_callbacks.py:23-125, 409`
+  - **文档**: [QC_THERMODYNAMICS_INTEGRATION.md](docs/QC_THERMODYNAMICS_INTEGRATION.md)
+
+### Changed
+- **放宽热力学参数合理性检查**: 避免误判有效数据
+  - **ΔH检查** (`core/qc/thermo_qc.py:283-301`):
+    - 旧标准: -1000 to -5 kJ/mol（严格范围）
+    - 新标准: 仅标记ΔH > 50 kJ/mol的大正值为可疑
+    - 原因: 小分子结合和弱相互作用的ΔH可以很小
+  - **ΔS检查** (`core/qc/thermo_qc.py:303-320`):
+    - 旧标准: -2500 to 0 J/mol/K
+    - **新标准: 不检查**（总是通过）
+    - 原因: ΔS范围高度依赖具体系统（蛋白解折叠vs配体结合vs疏水效应），无法设定通用标准
+  - **降级物理合理性检查** (`core/qc/thermo_qc.py:447-449`):
+    - 从critical failure（❌）降级为warning（⚠️）
+    - 异常参数不再自动导致QC失败
+  - **理由**: 热力学参数高度依赖实验系统，用户数据（ΔS = +28.2 cal/mol·K）对于熵驱动过程完全合理
+
+- **调整热力学单位选择器位置**:
+  - 从通用设置移至"Van't Hoff Parameters"折叠区域
+  - 修复重复ID冲突（删除`tab_callbacks.py`中的duplicate）
+  - 位置: `app/components/sidebar.py:119-131`
 
 ### Fixed
 - **恢复浓度排序和Status tooltip功能**: 修复之前丢失的表格功能

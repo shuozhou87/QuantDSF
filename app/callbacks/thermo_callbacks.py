@@ -20,6 +20,110 @@ from core.qc.config import QCSettings
 def register_thermo_callbacks(app: Dash) -> None:
     """注册热力学分析相关回调"""
 
+    def _create_qc_status_card(qc_metrics, units='calorie') -> html.Div:
+        """创建QC状态卡片UI组件
+
+        Args:
+            qc_metrics: QC评估结果
+            units: 单位选择 ('calorie' 或 'joule')
+        """
+        if qc_metrics is None:
+            return html.Div()
+
+        flag = qc_metrics.flag
+        message = qc_metrics.message
+        details = qc_metrics.details
+
+        # 根据flag设置颜色
+        color_map = {
+            '✅': 'success',
+            '⚠️': 'warning',
+            '❌': 'danger'
+        }
+        card_color = color_map.get(flag, 'secondary')
+
+        # 构建详细指标列表
+        detail_items = []
+        if details:
+            # Van't Hoff回归质量
+            detail_items.append(
+                html.Li([
+                    html.Strong("Van't Hoff Regression: "),
+                    f"R² = {details.get('vh_r2', 0):.3f}, ",
+                    f"n = {details.get('vh_n_points', 0)} points, ",
+                    f"ΔT = {details.get('delta_T', 0):.1f}°C"
+                ])
+            )
+
+            # 参数不确定性
+            dh_rel_err = details.get('dH_rel_err', 0)
+            ds_rel_err = details.get('dS_rel_err', 0)
+            detail_items.append(
+                html.Li([
+                    html.Strong("Parameter Uncertainty: "),
+                    f"ΔH error = {dh_rel_err:.1%}, ",
+                    f"ΔS error = {ds_rel_err:.1%}"
+                ])
+            )
+
+            # KD可靠性
+            reliability_298 = details.get('reliability_298', 'N/A')
+            reliability_310 = details.get('reliability_310', 'N/A')
+            extrap_298 = details.get('extrap_298', 0)
+            extrap_310 = details.get('extrap_310', 0)
+
+            extrap_text_298 = "interpolated" if extrap_298 == 0 else f"extrapolated ({extrap_298:.2f}×)"
+            extrap_text_310 = "interpolated" if extrap_310 == 0 else f"extrapolated ({extrap_310:.2f}×)"
+
+            detail_items.append(
+                html.Li([
+                    html.Strong("KD Reliability: "),
+                    f"298K ({reliability_298}, {extrap_text_298}), ",
+                    f"310K ({reliability_310}, {extrap_text_310})"
+                ])
+            )
+
+            # 物理合理性
+            dh_plausible = details.get('dH_plausible', True)
+            ds_plausible = details.get('dS_plausible', True)
+            plausibility_text = "✓ Parameters within expected range" if (dh_plausible and ds_plausible) else "✗ Parameters outside expected range"
+            detail_items.append(
+                html.Li([
+                    html.Strong("Physical Plausibility: "),
+                    plausibility_text
+                ])
+            )
+
+            # v0.9 新增指标
+            n_slices = details.get('n_slices')
+            if n_slices is not None:
+                detail_items.append(
+                    html.Li([
+                        html.Strong("Temperature Slices: "),
+                        f"N = {n_slices}"
+                    ])
+                )
+
+            window_valid = details.get('window_valid')
+            if window_valid is not None:
+                window_text = "✓ Inside transition region" if window_valid else "✗ Outside transition region"
+                detail_items.append(
+                    html.Li([
+                        html.Strong("Window Position: "),
+                        window_text
+                    ])
+                )
+
+        return dbc.Alert([
+            html.H5([
+                html.Span(flag, className="me-2"),
+                "Quality Control Assessment"
+            ], className="alert-heading"),
+            html.Hr(),
+            html.P(message, className="mb-2"),
+            html.Ul(detail_items, className="mb-0 small")
+        ], color=card_color, className="mt-3")
+
     def _format_kd(kd_molar: float) -> str:
         """自适应 KD 单位格式化"""
         if kd_molar is None or not np.isfinite(kd_molar) or kd_molar <= 0:
@@ -190,6 +294,7 @@ def register_thermo_callbacks(app: Dash) -> None:
         Output('vh-kd-298', 'children'),
         Output('vh-kd-310', 'children'),
         Output('vh-r2', 'children'),
+        Output('thermo-qc-status-container', 'children'),
         Input('run-vanthoff-btn', 'n_clicks'),
         State('protein-conc-input', 'value'),
         State('vh-method-selector', 'value'),
@@ -218,8 +323,8 @@ def register_thermo_callbacks(app: Dash) -> None:
                 font=dict(size=14, color="gray")
             )
             fig.update_layout(template='plotly_white')
-            return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--"
-        
+            return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--", html.Div()
+
         # 优先使用等温 EC50/KD 表的数据进行 Van't Hoff（温度-EC50/KD 曲线）
         if iso_table_data:
             temperatures = []
@@ -248,7 +353,7 @@ def register_thermo_callbacks(app: Dash) -> None:
                         font=dict(size=14, color="gray")
                     )
                     fig.update_layout(template='plotly_white')
-                    return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--"
+                    return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--", html.Div()
                 selected = [table_data[i] for i in selected_rows if i < len(table_data)]
                 valid_points = []
                 for row in selected:
@@ -282,8 +387,8 @@ def register_thermo_callbacks(app: Dash) -> None:
                 font=dict(size=14, color="gray")
             )
             fig.update_layout(template='plotly_white')
-            return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--"
-        
+            return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--", html.Div()
+
         try:
             from core.analysis.thermodynamic import vanthoff
             from core.analysis.thermodynamic.ec50_kd import convert_ec50_to_kd
@@ -313,7 +418,7 @@ def register_thermo_callbacks(app: Dash) -> None:
                     font=dict(size=14, color="red")
                 )
                 fig.update_layout(template='plotly_white')
-                return fig, "Error", "Error", "Error", "--", "--"
+                return fig, "Error", "Error", "Error", "--", "--", html.Div()
 
             temperatures_c = temperatures_c[mask_finite]
             kd_values = kd_values[mask_finite]
@@ -371,24 +476,42 @@ def register_thermo_callbacks(app: Dash) -> None:
                     legend=dict(orientation='h', yanchor='bottom', y=1.02)
                 )
 
+                # 计算参数误差（从stderr_a, stderr_b）
+                stderr_a = result.get('stderr_a', 0.0)
+                stderr_b = result.get('stderr_b', 0.0)
+                R = 8.314  # J/mol/K
+                dH_err = abs(stderr_a * R)
+                dS_err = abs(stderr_b * R)
+
+                # 计算温度范围
+                T_kelvin = temperatures_c + 273.15
+                delta_T = temperatures_c.max() - temperatures_c.min()
+
                 # Run QC evaluation for thermodynamic analysis
                 thermo_result_dict = {
-                    'deltaH': delta_h,
-                    'deltaS': delta_s,
-                    'r2': r2,
-                    'n_points': len(kd_values),
+                    'vh_r2': r2,
+                    'vh_n_points': len(kd_values),
+                    'delta_T': delta_T,
+                    'dH': delta_h,
+                    'dS': delta_s,
+                    'dH_err': dH_err,
+                    'dS_err': dS_err,
+                    'Kd_298K': kd_298_raw,
+                    'Kd_310K': kd_310_raw,
+                    'T_min': float(T_kelvin.min()),
+                    'T_max': float(T_kelvin.max()),
                     'n_slices': len(temperatures_c),
-                    'T_window_start': temperatures_c.min() if len(temperatures_c) > 0 else None,
-                    'T_window_end': temperatures_c.max() if len(temperatures_c) > 0 else None,
-                    # Would need T_array, F_array, Tm for onset/offset detection
-                    # These are not directly available here; could be added if needed
+                    'T_window_start': float(temperatures_c.min()) if len(temperatures_c) > 0 else None,
+                    'T_window_end': float(temperatures_c.max()) if len(temperatures_c) > 0 else None,
+                    # Optional: T_array, F_array, Tm for transition bounds detection
+                    # These would need to be extracted from results_data if available
                 }
 
                 qc_controller = ThermodynamicQualityController(settings=QCSettings())
                 qc_metrics = qc_controller.evaluate(thermo_result_dict)
 
-                # Note: QC results are computed but not currently displayed in Tab 2 UI
-                # Could be added to the UI in future enhancement
+                # 创建QC状态卡片（传递units参数）
+                qc_card = _create_qc_status_card(qc_metrics, units=units)
 
                 return (
                     fig,
@@ -396,7 +519,8 @@ def register_thermo_callbacks(app: Dash) -> None:
                     f"{delta_s_conv:.1f} {delta_s_unit}",
                     _format_kd(kd_298_raw),
                     _format_kd(kd_310_raw),
-                    f"{r2:.4f}"
+                    f"{r2:.4f}",
+                    qc_card
                 )
             else:
                 r2_val = result.get('r2') if result else None
@@ -407,8 +531,8 @@ def register_thermo_callbacks(app: Dash) -> None:
                                    x=0.5, y=0.5, showarrow=False,
                                    font=dict(size=14, color="red"))
                 fig.update_layout(template='plotly_white')
-                return fig, "Error", "Error", "Error", "--"
-                
+                return fig, "Error", "Error", "Error", "--", "--", html.Div()
+
         except Exception as e:
             fig.add_annotation(
                 text=f"Error: {str(e)}",
@@ -418,7 +542,7 @@ def register_thermo_callbacks(app: Dash) -> None:
                 font=dict(size=14, color="red")
             )
             fig.update_layout(template='plotly_white')
-            return fig, "Error", "Error", "Error", "--", "--"
+            return fig, "Error", "Error", "Error", "--", "--", html.Div()
 
 
     @app.callback(

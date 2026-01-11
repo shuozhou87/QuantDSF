@@ -330,7 +330,9 @@ def _create_thermo_analysis_content(results_data) -> html.Div:
         dbc.Card([
             dbc.CardHeader("📈 Van't Hoff Plot"),
             dbc.CardBody([
-                dcc.Graph(id='vanthoff-plot', style={'height': '450px'})
+                dcc.Graph(id='vanthoff-plot', style={'height': '450px'}),
+                # QC 状态卡片
+                html.Div(id="thermo-qc-status-container", className="mt-3")
             ])
         ], className="shadow-sm mb-4"),
 

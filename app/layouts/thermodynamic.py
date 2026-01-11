@@ -8,6 +8,7 @@ Thermodynamic Analysis Layout
 
 from dash import html, dcc
 import dash_bootstrap_components as dbc
+from dash import dash_table
 
 
 def create_thermodynamic_layout() -> html.Div:
@@ -101,7 +102,7 @@ def create_thermodynamic_layout() -> html.Div:
                 "4️⃣ Van't Hoff Results"
             ]),
             dbc.CardBody([
-                # 结果指标
+                # 结果指标 - 第一行：ΔH, ΔS, R²
                 dbc.Row([
                     dbc.Col([
                         dbc.Card([
@@ -110,7 +111,7 @@ def create_thermodynamic_layout() -> html.Div:
                                 html.H3(id="vh-delta-h", children="-- kJ/mol", className="text-primary mb-0")
                             ])
                         ], className="shadow-sm text-center")
-                    ], md=3),
+                    ], md=4),
                     dbc.Col([
                         dbc.Card([
                             dbc.CardBody([
@@ -118,15 +119,27 @@ def create_thermodynamic_layout() -> html.Div:
                                 html.H3(id="vh-delta-s", children="-- J/mol·K", className="text-success mb-0")
                             ])
                         ], className="shadow-sm text-center")
-                    ], md=3),
+                    ], md=4),
                     dbc.Col([
                         dbc.Card([
                             dbc.CardBody([
-                                html.H6("KD (298K)", className="text-muted mb-1"),
+                                html.H6("R²", className="text-muted mb-1"),
+                                html.H3(id="vh-r2", children="--", className="text-secondary mb-0")
+                            ])
+                        ], className="shadow-sm text-center")
+                    ], md=4),
+                ], className="mb-2"),
+
+                # 结果指标 - 第二行：KD值
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardBody([
+                                html.H6("KD (298K / 25°C)", className="text-muted mb-1"),
                                 html.H3(id="vh-kd-298", children="-- nM", className="text-info mb-0")
                             ])
                         ], className="shadow-sm text-center")
-                    ], md=3),
+                    ], md=6),
                     dbc.Col([
                         dbc.Card([
                             dbc.CardBody([
@@ -134,14 +147,14 @@ def create_thermodynamic_layout() -> html.Div:
                                 html.H3(id="vh-kd-310", children="-- nM", className="text-info mb-0")
                             ])
                         ], className="shadow-sm text-center")
-                    ], md=3),
+                    ], md=6),
                 ], className="mb-3", id="vanthoff-metrics-row"),
                 
                 # Van't Hoff 图
                 dcc.Graph(id='vanthoff-plot', style={'height': '400px'}),
-                
-                # 可靠性评估
-                html.Div(id="reliability-assessment-container", className="mt-3")
+
+                # QC 状态卡片
+                html.Div(id="thermo-qc-status-container", className="mt-3")
             ])
         ], className="shadow-sm mb-4"),
         

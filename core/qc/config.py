@@ -204,32 +204,32 @@ class QCSettings(BaseModel):
 
     dr_dynamic_range_excellent: float = Field(
         60.0,
-        description="4PL 动态范围 优秀阈值 (≥60%绿标)"
+        description="数据覆盖率 优秀阈值 (%, ≥60%绿标, 实验数据覆盖拟合动态范围的比例)"
     )
 
     dr_dynamic_range_good: float = Field(
         30.0,
-        description="4PL 动态范围 良好阈值 (30-60%黄标)"
+        description="数据覆盖率 良好阈值 (%, 30-60%黄标)"
     )
 
     dr_dynamic_range_marginal: float = Field(
         30.0,
-        description="4PL 动态范围 可接受阈值 (<30%红标)"
+        description="数据覆盖率 可接受阈值 (%, ≥30%可接受, <30%红标)"
     )
 
     dr_data_coverage_excellent: float = Field(
         60.0,
-        description="实际数据覆盖范围 优秀阈值 (≥60%绿标)"
+        description="数据覆盖率 优秀阈值 (%, ≥60%绿标) - 同dynamic_range"
     )
 
     dr_data_coverage_good: float = Field(
         30.0,
-        description="实际数据覆盖范围 良好阈值 (30-60%黄标)"
+        description="数据覆盖率 良好阈值 (%, 30-60%黄标) - 同dynamic_range"
     )
 
     dr_data_coverage_marginal: float = Field(
         30.0,
-        description="实际数据覆盖范围 可接受阈值 (<30%红标)"
+        description="数据覆盖率 可接受阈值 (%, ≥30%可接受) - 同dynamic_range"
     )
 
     dr_hill_slope_min_normal: float = Field(

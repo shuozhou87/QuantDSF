@@ -24,13 +24,15 @@ def register_dose_response_callbacks(app: Dash) -> None:
         Output('dr-selection-hint', 'children'),
         Input('analysis-results-store', 'data'),
         Input('main-tabs', 'active_tab'),
-        prevent_initial_call=True
+        prevent_initial_call=False
     )
     def populate_dr_table(results_data, active_tab):
         """Populate dose-response data selection table"""
+        # Only populate when on dose-response tab
         if active_tab != 'dose':
             return no_update, no_update, no_update
 
+        # Check if we have analysis results
         if not results_data or not results_data.get('results'):
             return [], [], "No analysis data. Run Tm analysis first."
 
@@ -151,22 +153,24 @@ def register_dose_response_callbacks(app: Dash) -> None:
         # Run QC evaluation for dose-response analysis
         bottom = fit_result['bottom']
         top = fit_result['top']
-        dynamic_range_pct = (abs(top - bottom) / max(abs(top), abs(bottom))) * 100.0 if max(abs(top), abs(bottom)) > 0 else 0.0
+        ec50 = fit_result['ec50']
 
-        # Calculate data coverage (actual experimental coverage)
-        response_range = tm_values.max() - tm_values.min()
-        data_coverage_pct = (response_range / max(abs(top), abs(bottom))) * 100.0 if max(abs(top), abs(bottom)) > 0 else 0.0
+        # Calculate dynamic range and data coverage
+        dynamic_range_degc = abs(top - bottom)  # Theoretical Tm shift range (°C)
+        experimental_range = tm_values.max() - tm_values.min()  # Actual Tm range in data
+        data_coverage_pct = (experimental_range / dynamic_range_degc) * 100.0 if dynamic_range_degc > 0 else 0.0
 
+        # Prepare data for QC evaluation with correct field names
         dr_result_dict = {
-            'ec50': fit_result['ec50'],
-            'r2': fit_result['r2'],
-            'hill_slope': fit_result['hill_slope'],
+            'r_squared': fit_result['r2'],  # QC expects 'r_squared', not 'r2'
+            'n_points': len(concentrations),
             'bottom': bottom,
             'top': top,
-            'n_points': len(concentrations),
-            'concentration_range': [concentrations.min(), concentrations.max()],
-            'dynamic_range_pct': dynamic_range_pct,
-            'data_coverage_pct': data_coverage_pct,
+            'hill_slope': fit_result['hill_slope'],
+            'EC50': ec50,  # QC expects 'EC50', not 'ec50'
+            'EC50_err': fit_result.get('ec50_se'),  # Standard error from fitting
+            'concentrations': concentrations.tolist(),  # QC expects 'concentrations' array
+            'responses': tm_values.tolist(),  # Pass actual response data for coverage calculation
         }
 
         qc_controller = DoseResponseQualityController(settings=QCSettings())
@@ -324,8 +328,8 @@ def register_dose_response_callbacks(app: Dash) -> None:
                         html.Td(f"{len(concentrations)}")
                     ]),
                     html.Tr([
-                        html.Td("Dynamic Range"),
-                        html.Td(f"{dynamic_range_pct:.1f}%")
+                        html.Td("Dynamic Range (Top-Bottom)"),
+                        html.Td(f"{dynamic_range_degc:.2f} °C")
                     ]),
                     html.Tr([
                         html.Td("Data Coverage"),

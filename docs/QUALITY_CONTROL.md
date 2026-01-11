@@ -1,7 +1,7 @@
 # QuantDSF Quality Control Specification
 
-**Version**: 2.3 (v0.9 Guidelines Compliant)
-**Last Updated**: 2026-01-09
+**Version**: 2.3.1 (v0.9 Guidelines Compliant)
+**Last Updated**: 2026-01-10
 **Status**: Production - Implemented with v0.9 Features
 
 ---
@@ -955,33 +955,15 @@ Tab 3 QC evaluates the quality of 4-parameter logistic (4PL) fits for EC₅₀ d
 
 ---
 
-##### **A2. Dynamic Range (Theoretical)** ⭐ **[REVISED THRESHOLDS]**
+##### **A2. Data Coverage** ⭐ **[UPDATED METRIC]**
 
-**Definition**: Theoretical range based on fitted top and bottom plateaus
+**Definition**: Percentage of fitted dynamic range actually covered by experimental data
 
+**Formula**:
 ```
-Dynamic Range = (Top - Bottom) / Top × 100%
-```
-
-| Dynamic Range | Quality | Flag |
-|---------------|---------|------|
-| ≥ 60% | Excellent | ✅ |
-| 30-60% | Acceptable | ⚠️ |
-| < 30% | Poor | ❌ |
-
-**Rationale**:
-- Three-tier system matches AUC dynamic range
-- < 30%: EC₅₀ very poorly defined
-- ≥ 60%: Well-defined dose-response curve
-
----
-
-##### **A2b. Data Coverage (Actual)** ⭐ **[NEW METRIC]**
-
-**Definition**: Actual experimental data coverage of theoretical dynamic range
-
-```
-Data Coverage = (max(responses) - min(responses)) / Top × 100%
+Dynamic Range (theoretical) = |Top - Bottom|  (in °C)
+Experimental Range = |Tm_max - Tm_min|  (in °C)
+Data Coverage = (Experimental Range / Dynamic Range) × 100%
 ```
 
 | Data Coverage | Quality | Flag |
@@ -990,13 +972,18 @@ Data Coverage = (max(responses) - min(responses)) / Top × 100%
 | 30-60% | Acceptable | ⚠️ |
 | < 30% | Poor | ❌ |
 
-**Why it matters**:
-- Data Coverage evaluates **experimental design quality**
-- Dynamic Range evaluates **fitted curve quality**
-- Low Data Coverage → Need wider concentration range
-- Example: Fitted Top=100, Bottom=10, but actual data only spans 40-80
-  - Dynamic Range = 90% (excellent by fit)
-  - Data Coverage = 40% (marginal - didn't reach true plateaus)
+**Rationale**:
+- Measures experimental sampling quality of the dose-response transition
+- < 30%: Insufficient data coverage - need wider concentration range
+- 30-60%: Adequate coverage but could be improved
+- ≥ 60%: Excellent coverage of the Tm shift range
+
+**Example**:
+- Fitted Top=60°C, Bottom=50°C → Dynamic Range = 10°C
+- If experimental Tm values span 52-58°C → Experimental Range = 6°C
+  - Data Coverage = (6 / 10) × 100% = 60% (✅ Excellent)
+- If experimental Tm values span 53-55°C → Experimental Range = 2°C
+  - Data Coverage = (2 / 10) × 100% = 20% (❌ Poor - insufficient sampling)
 
 ---
 
@@ -1096,15 +1083,15 @@ def assess_dose_response_quality(dr_result):
     """
     r2 = dr_result.r_squared
     n = dr_result.n_points
-    dynamic_range = dr_result.dynamic_range
+    data_coverage_pct = dr_result.data_coverage_pct
     hill_slope = dr_result.hill_slope
 
     # Critical failures
     if n < 4 or r2 < 0.85:
         return '❌', 'Insufficient data or poor fit'
 
-    if dynamic_range < 20:
-        return '❌', 'Dynamic range too low'
+    if data_coverage_pct < 30:
+        return '❌', f'Insufficient data coverage ({data_coverage_pct:.1f}%)'
 
     # Warning conditions
     warnings = []
@@ -1115,8 +1102,8 @@ def assess_dose_response_quality(dr_result):
     if n < 6:
         warnings.append(f'Few concentrations: {n}')
 
-    if dynamic_range < 40:
-        warnings.append(f'Low dynamic range: {dynamic_range:.1f}%')
+    if data_coverage_pct < 60:
+        warnings.append(f'Low data coverage: {data_coverage_pct:.1f}%')
 
     if hill_slope < 0.5 or hill_slope > 3.0:
         warnings.append(f'Unusual Hill slope: {hill_slope:.2f}')
@@ -1382,9 +1369,9 @@ QuantDSF v2.1 implements comprehensive, modular quality control across all three
 - Physical plausibility checks
 
 ✅ **Tab 3 (Dose-Response)**: 4PL fitting quality
-- R², dynamic range, Hill slope
+- R², data coverage (experimental range / fitted range), Hill slope
 - Concentration coverage, bracketing
-- Baseline stability
+- EC50 reliability
 
 **Key improvements from V1**:
 - ⭐ State SNR added back to TSB QC

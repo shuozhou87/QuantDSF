@@ -282,32 +282,42 @@ class ThermodynamicQualityController(QualityController):
 
     def _check_dH_plausibility(self, dH: float) -> bool:
         """
-        检查ΔH物理合理性
+        检查ΔH物理合理性（仅检查极端异常值）
 
-        典型蛋白质解折叠: -800 to -50 kJ/mol
+        对于蛋白质稳定性和配体结合研究，ΔH通常为负值（放热）。
+        只标记明显不合理的大正值作为警告。
+
+        注意：小的正ΔH值（<50 kJ/mol）可能是真实的（如熵驱动过程），
+        所以只标记大的正值作为可疑。
 
         Args:
             dH: 焓变 (J/mol)
 
         Returns:
-            是否合理
+            是否合理（False仅表示极端异常）
         """
         dH_kJ = dH / 1000.0
-        return -800 <= dH_kJ <= -50
+        # 只标记大的正值（>50 kJ/mol）为不合理，其他都接受
+        return dH_kJ <= 50
 
     def _check_dS_plausibility(self, dS: float) -> bool:
         """
         检查ΔS物理合理性
 
-        典型蛋白质解折叠: -2500 to 0 J/mol/K
+        ΔS的范围极其广泛，取决于具体过程：
+        - 蛋白质解折叠：通常为负（有序→无序时例外）
+        - 配体结合：可正可负（取决于脱溶剂化、构象变化等）
+        - 疏水效应：常为正（释放水分子）
+
+        由于ΔS变化范围太大且依赖于具体系统，不进行合理性检查。
 
         Args:
             dS: 熵变 (J/mol/K)
 
         Returns:
-            是否合理
+            总是返回True（不检查）
         """
-        return -2500 <= dS <= 0
+        return True  # 不检查ΔS合理性
 
     def _calculate_score(self, metrics: Dict[str, Any]) -> float:
         """
@@ -431,9 +441,6 @@ class ThermodynamicQualityController(QualityController):
         if n_points < self.settings.thermo_min_points_good:
             return '❌'
 
-        if not dH_plausible or not dS_plausible:
-            return '❌'
-
         # Warning conditions
         if r2 < self.settings.thermo_r2_good:
             return '⚠️'
@@ -442,6 +449,10 @@ class ThermodynamicQualityController(QualityController):
             return '⚠️'
 
         if n_points < self.settings.thermo_min_points_excellent:
+            return '⚠️'
+
+        # Physical plausibility is now a warning, not critical
+        if not dH_plausible or not dS_plausible:
             return '⚠️'
 
         # v0.9: Dynamic range 30-60% is marginal
@@ -483,6 +494,15 @@ class ThermodynamicQualityController(QualityController):
             n_points = metrics['vh_n_points']
             if n_points < self.settings.thermo_min_points_excellent:
                 issues.append(f"Few points: {n_points}")
+
+            # Add physical plausibility warnings
+            if not metrics['dH_plausible']:
+                dH_kJ = metrics['dH'] / 1000.0
+                issues.append(f"ΔH outside typical range ({dH_kJ:.1f} kJ/mol)")
+
+            if not metrics['dS_plausible']:
+                dS = metrics['dS']
+                issues.append(f"ΔS outside typical range ({dS:.0f} J/mol·K)")
 
             return "; ".join(issues) if issues else "Marginal reliability"
 

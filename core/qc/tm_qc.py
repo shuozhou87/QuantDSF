@@ -133,13 +133,15 @@ class TmQualityController(QualityController):
     def _get_tsb_metrics(self, tm_result) -> Dict[str, Any]:
         """获取TSB特定指标"""
         if isinstance(tm_result, dict):
+            # Handle None values explicitly - .get() returns None if key exists with None value
+            tm_error = tm_result.get('Tm_error')
             metrics = {
-                'state_snr': tm_result.get('state_snr', float('nan')),
-                'delta_aic': tm_result.get('delta_aic', 0.0),
-                'log_delta_aic': tm_result.get('log_delta_aic', 0.0),
-                'delta_bic': tm_result.get('delta_bic', 0.0),
-                'log_delta_bic': tm_result.get('log_delta_bic', 0.0),
-                'tm_error': tm_result.get('Tm_error', float('inf')),
+                'state_snr': tm_result.get('state_snr') or float('nan'),
+                'delta_aic': tm_result.get('delta_aic') or 0.0,
+                'log_delta_aic': tm_result.get('log_delta_aic') or 0.0,
+                'delta_bic': tm_result.get('delta_bic') or 0.0,
+                'log_delta_bic': tm_result.get('log_delta_bic') or 0.0,
+                'tm_error': tm_error if tm_error is not None else float('inf'),
             }
         else:
             metrics = {
@@ -261,6 +263,10 @@ class TmQualityController(QualityController):
 
         # Tm误差: <0.3绿, 0.3-1.0黄, >1.0红
         tm_error = metrics.get('tm_error', float('inf'))
+        # Handle None case (when Tm_error is unavailable)
+        if tm_error is None:
+            tm_error = float('inf')
+
         if tm_error < self.settings.tm_error_excellent:
             flags['tm_error'] = '✅'
         elif tm_error < self.settings.tm_error_marginal:
@@ -434,6 +440,10 @@ class TmQualityController(QualityController):
             score += 4
 
         # Tm error scoring (10 points)
+        # Handle None case
+        if tm_error is None:
+            tm_error = float('inf')
+
         if tm_error < self.settings.tm_error_excellent:
             score += 10
         elif tm_error < self.settings.tm_error_good:
@@ -575,9 +585,11 @@ class TmQualityController(QualityController):
             snr = metrics.get('state_snr', float('nan'))
             return f"{snr:.1f}" if not np.isnan(snr) else "N/A"
         elif key == 'delta_aic':
-            return f"{metrics.get('log_delta_aic', 0.0):.2f}"
+            aic = metrics.get('log_delta_aic', 0.0)
+            return f"{aic:.2f}" if aic is not None else "0.00"
         elif key == 'delta_bic':
-            return f"{metrics.get('log_delta_bic', 0.0):.2f}"
+            bic = metrics.get('log_delta_bic', 0.0)
+            return f"{bic:.2f}" if bic is not None else "0.00"
         elif key == 'tm_error':
             err = metrics.get('tm_error', float('inf'))
             return f"±{err:.2f}°C" if err != float('inf') else "N/A"

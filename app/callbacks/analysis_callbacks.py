@@ -92,7 +92,7 @@ def _process_single_sample(args):
         result = fit_boltzmann_model(T, F, model='exponential')
         if result and result.get('success'):
             tm = result['Tm']
-            tm_error = result.get('Tm_error')
+            tm_error = result.get('Tm_std')  # TSB returns 'Tm_std', not 'Tm_error'
             r2 = result['R_squared']
             state_snr = result.get('state_snr')
             delta_aic = result.get('delta_aic')

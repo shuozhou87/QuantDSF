@@ -97,21 +97,24 @@ class DoseResponseQualityController(QualityController):
         EC50 = dr_result.get('EC50')
         EC50_err = dr_result.get('EC50_err')
 
-        # Calculate dynamic range (理论范围: top vs bottom)
-        dynamic_range = abs(top - bottom)
-        dynamic_range_pct = (dynamic_range / max(abs(top), abs(bottom))) * 100.0 if max(abs(top), abs(bottom)) > 0 else 0.0
+        # Calculate dynamic range (理论范围: top vs bottom, in °C)
+        dynamic_range = abs(top - bottom)  # Theoretical Tm shift range in °C
 
-        # Calculate data coverage (实际数据覆盖的动态范围)
-        # 使用实际数据的min/max计算
+        # Calculate data coverage (实际数据覆盖理论动态范围的百分比)
+        # Data coverage = (实验Tm_max - 实验Tm_min) / (Top - Bottom) × 100%
         responses = dr_result.get('responses', [])
-        if responses and len(responses) > 0:
+        if responses and len(responses) > 0 and dynamic_range > 0:
             response_array = np.array(responses)
             data_min = response_array.min()
             data_max = response_array.max()
-            data_coverage = abs(data_max - data_min)
-            data_coverage_pct = (data_coverage / max(abs(top), abs(bottom))) * 100.0 if max(abs(top), abs(bottom)) > 0 else 0.0
+            experimental_range = abs(data_max - data_min)
+            data_coverage_pct = (experimental_range / dynamic_range) * 100.0
         else:
             data_coverage_pct = 0.0
+
+        # Store dynamic_range_pct as data_coverage_pct (they measure the same thing)
+        # dynamic_range_pct will be used for QC thresholds
+        dynamic_range_pct = data_coverage_pct
 
         # Calculate EC50 relative error
         EC50_rel_err = abs(EC50_err / EC50) if EC50 is not None and EC50 > 0 and EC50_err is not None else float('inf')
@@ -306,7 +309,7 @@ class DoseResponseQualityController(QualityController):
 
             dynamic_range_pct = metrics['dynamic_range_pct']
             if dynamic_range_pct < self.settings.dr_dynamic_range_good:
-                issues.append(f"Low dynamic range: {dynamic_range_pct:.0f}%")
+                issues.append(f"Low data coverage: {dynamic_range_pct:.1f}%")
 
             if not metrics['EC50_in_range']:
                 issues.append("EC50 outside concentration range")
@@ -320,7 +323,7 @@ class DoseResponseQualityController(QualityController):
 
             dynamic_range_pct = metrics['dynamic_range_pct']
             if dynamic_range_pct < self.settings.dr_dynamic_range_marginal:
-                return f"Insufficient dynamic range ({dynamic_range_pct:.0f}%)"
+                return f"Insufficient data coverage ({dynamic_range_pct:.1f}%)"
 
             if not metrics['hill_plausible']:
                 hill_slope = metrics['hill_slope']
@@ -353,7 +356,7 @@ class DoseResponseQualityController(QualityController):
             dynamic_range_pct = metrics['dynamic_range_pct']
             hill_slope = metrics['hill_slope']
 
-            return f"R²={r2:.3f}, Range={dynamic_range_pct:.0f}%, Hill={hill_slope:.2f}"
+            return f"R²={r2:.3f}, Coverage={dynamic_range_pct:.1f}%, Hill={hill_slope:.2f}"
 
         elif flag == '⚠️':
             # Warning: Show specific issues with thresholds
@@ -365,7 +368,7 @@ class DoseResponseQualityController(QualityController):
 
             dynamic_range_pct = metrics['dynamic_range_pct']
             if dynamic_range_pct < self.settings.dr_dynamic_range_good:
-                issues.append(f"Range: {dynamic_range_pct:.0f}% (threshold: {self.settings.dr_dynamic_range_good}%)")
+                issues.append(f"Coverage: {dynamic_range_pct:.1f}% (threshold: {self.settings.dr_dynamic_range_good}%)")
 
             if not metrics['EC50_in_range']:
                 issues.append("EC50 extrapolated")

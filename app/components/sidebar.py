@@ -110,10 +110,15 @@ def _create_method_settings() -> html.Div:
                 value='ratio',
             ),
         ], className="mb-3"),
-        
+    ])
+
+
+def _create_thermodynamic_settings() -> html.Div:
+    """热力学分析参数"""
+    return html.Div([
         # 单位选择
         html.Div([
-            html.Label("🌡️ Thermodynamic Units", className="fw-bold mb-2"),
+            html.Label("Thermodynamic Units", className="fw-bold mb-2"),
             dbc.RadioItems(
                 id='units-selector',
                 options=[
@@ -124,12 +129,7 @@ def _create_method_settings() -> html.Div:
                 inline=True
             ),
         ], className="mb-3"),
-    ])
 
-
-def _create_thermodynamic_settings() -> html.Div:
-    """热力学分析参数"""
-    return html.Div([
         # 等温拟合参数
         html.Label("Isothermal Fitting", className="fw-bold mb-2"),
         
