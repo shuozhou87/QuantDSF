@@ -531,7 +531,10 @@ def register_thermo_callbacks(app: Dash) -> None:
                     'qc_flag': qc_metrics.flag,
                     'qc_message': qc_metrics.message,
                     'qc_score': qc_metrics.score,
-                    'units': units  # Store user's unit preference
+                    'qc_details': qc_metrics.details if hasattr(qc_metrics, 'details') else None,
+                    'units': units,  # Store user's unit preference
+                    # Store figure for export
+                    'figure': fig
                 }
 
                 return (

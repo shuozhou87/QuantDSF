@@ -31,13 +31,6 @@ def register_export_callbacks(app: Dash) -> None:
         State('min-4pl-r2-input', 'value'),
         State('vh-optimize-checkbox', 'value'),
         State('vh-min-points-input', 'value'),
-        # Figure states - we'll get figures from the UI components
-        State('melting-curves-plot', 'figure'),
-        State('tm-distribution-plot', 'figure'),
-        State('dose-response-plot', 'figure'),
-        State('vanthoff-plot', 'figure'),
-        State('vh-overlay-plot', 'figure'),
-        State('isothermal-panels-plot', 'figure'),
         prevent_initial_call=True
     )
     def export_complete_package(
@@ -52,13 +45,7 @@ def register_export_callbacks(app: Dash) -> None:
         min_dr,
         min_4pl_r2,
         vh_optimize,
-        vh_min_points,
-        melting_curves_fig,
-        tm_dist_fig,
-        dose_response_fig,
-        vanthoff_fig,
-        vh_overlay_fig,
-        isothermal_panels_fig
+        vh_min_points
     ):
         """
         Export complete analysis package (Excel + PNG figures) as ZIP.
@@ -91,20 +78,25 @@ def register_export_callbacks(app: Dash) -> None:
             }
         }
 
-        # Collect all figures (convert from dict to Figure objects)
+        # Collect figures from stored data (where available)
         figures = {}
-        if melting_curves_fig:
-            figures['melting-curves-plot'] = go.Figure(melting_curves_fig)
-        if tm_dist_fig:
-            figures['tm-distribution-plot'] = go.Figure(tm_dist_fig)
-        if dose_response_fig:
-            figures['dose-response-plot'] = go.Figure(dose_response_fig)
-        if vanthoff_fig:
-            figures['vanthoff-plot'] = go.Figure(vanthoff_fig)
-        if vh_overlay_fig:
-            figures['vh-overlay-plot'] = go.Figure(vh_overlay_fig)
-        if isothermal_panels_fig:
-            figures['isothermal-panels-plot'] = go.Figure(isothermal_panels_fig)
+
+        # Dose-Response figure
+        if dose_response_data and 'figure' in dose_response_data:
+            try:
+                figures['dose-response-plot'] = go.Figure(dose_response_data['figure'])
+            except:
+                pass
+
+        # Thermodynamics figure
+        if thermodynamics_data and 'figure' in thermodynamics_data:
+            try:
+                figures['vanthoff-plot'] = go.Figure(thermodynamics_data['figure'])
+            except:
+                pass
+
+        # Note: Basic analysis figures are not stored yet
+        # TODO: Store basic analysis figures (melting-curves-plot, tm-distribution-plot) in analysis-results-store
 
         # Create export package
         try:

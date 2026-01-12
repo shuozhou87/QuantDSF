@@ -353,7 +353,10 @@ def register_dose_response_callbacks(app: Dash) -> None:
             'tm_values': tm_values.tolist(),
             'qc_flag': qc_metrics.flag,
             'qc_message': qc_metrics.message,
-            'qc_score': qc_metrics.score
+            'qc_score': qc_metrics.score,
+            'qc_tooltip': qc_metrics.tooltip if hasattr(qc_metrics, 'tooltip') else None,
+            # Store figure for export
+            'figure': fig
         }
 
         return results_display, fig, dose_response_data

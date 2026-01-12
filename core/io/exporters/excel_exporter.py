@@ -121,8 +121,10 @@ def _write_dose_response_sheet(writer: pd.ExcelWriter, data: Optional[Dict[str, 
             'Bottom (°C)': data.get('bottom'),
             'Top (°C)': data.get('top'),
             'N Points': data.get('n_points'),
-            'QC Status': data.get('qc_message', ''),
             'QC Flag': data.get('qc_flag', ''),
+            'QC Score': data.get('qc_score'),
+            'QC Message': data.get('qc_message', ''),
+            'QC Details': data.get('qc_tooltip', ''),
         }]
         df = pd.DataFrame(rows)
     else:
@@ -136,11 +138,13 @@ def _write_dose_response_sheet(writer: pd.ExcelWriter, data: Optional[Dict[str, 
             'Bottom (°C)': [],
             'Top (°C)': [],
             'N Points': [],
-            'QC Status': [],
-            'QC Flag': []
+            'QC Flag': [],
+            'QC Score': [],
+            'QC Message': [],
+            'QC Details': []
         })
         df.loc[0] = ['No Dose-Response analysis run. Please navigate to Dose-Response tab and run analysis to generate EC50 data.',
-                     '', '', '', '', '', '', '', '', '']
+                     '', '', '', '', '', '', '', '', '', '', '']
 
     df.to_excel(writer, sheet_name='Dose_Response', index=False)
 
@@ -162,6 +166,7 @@ def _write_thermodynamics_sheet(writer: pd.ExcelWriter, data: Optional[Dict[str,
 
         rows = [
             {'Parameter': 'R²', 'Value': data.get('r2'), 'Unit': '-', 'QC Status': data.get('qc_flag', '')},
+            {'Parameter': 'QC Score', 'Value': data.get('qc_score'), 'Unit': '/100', 'QC Status': ''},
             {'Parameter': 'N Points', 'Value': data.get('n_points'), 'Unit': '-', 'QC Status': ''},
             {'Parameter': 'ΔH', 'Value': data.get('delta_h_display'), 'Unit': delta_h_unit, 'QC Status': ''},
             {'Parameter': 'ΔS', 'Value': data.get('delta_s_display'), 'Unit': delta_s_unit, 'QC Status': ''},
@@ -170,15 +175,29 @@ def _write_thermodynamics_sheet(writer: pd.ExcelWriter, data: Optional[Dict[str,
         ]
         df = pd.DataFrame(rows)
 
-        # Add QC message as a note row
+        # Add QC message and details
         if data.get('qc_message'):
             note_row = pd.DataFrame([{
                 'Parameter': 'QC Summary',
                 'Value': data['qc_message'],
                 'Unit': '',
-                'QC Status': data.get('qc_flag', '')
+                'QC Status': ''
             }])
             df = pd.concat([df, note_row], ignore_index=True)
+
+        # Add QC details if available
+        if data.get('qc_details'):
+            qc_details = data['qc_details']
+            if isinstance(qc_details, dict):
+                # Add each detail as a separate row
+                for key, value in qc_details.items():
+                    detail_row = pd.DataFrame([{
+                        'Parameter': f'  QC Detail: {key}',
+                        'Value': str(value),
+                        'Unit': '',
+                        'QC Status': ''
+                    }])
+                    df = pd.concat([df, detail_row], ignore_index=True)
     else:
         # Empty placeholder
         df = pd.DataFrame({
