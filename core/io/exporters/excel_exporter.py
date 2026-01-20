@@ -109,9 +109,12 @@ def _write_basic_analysis_sheet(writer: pd.ExcelWriter, data: Optional[Dict[str,
 
 
 def _write_dose_response_sheet(writer: pd.ExcelWriter, data: Optional[Dict[str, Any]]):
-    """Write Dose Response sheet with EC50 results."""
+    """Write Dose Response sheet with EC50 results and SFQ analysis."""
     if data and data.get('ec50') is not None:
-        # Single row table with dose-response parameters
+        # Extract SFQ data if available
+        sfq = data.get('sfq_result', {}) or {}
+
+        # Single row table with dose-response parameters + SFQ
         rows = [{
             'EC50 (M)': data.get('ec50'),
             'EC50 CI Lower (M)': data['ec50_ci'][0] if data.get('ec50_ci') else None,
@@ -125,6 +128,15 @@ def _write_dose_response_sheet(writer: pd.ExcelWriter, data: Optional[Dict[str, 
             'QC Score': data.get('qc_score'),
             'QC Message': data.get('qc_message', ''),
             'QC Details': data.get('qc_tooltip', ''),
+            # SFQ fields
+            'SFQ Status': sfq.get('dataset_status', 'N/A'),
+            'SFQ Channel': sfq.get('channel_name', ''),
+            'SFQ Mode': sfq.get('mode', ''),
+            'SFQ EC50_app': sfq.get('ec50_app_str', ''),
+            'SFQ Span (%)': sfq.get('span'),
+            'SFQ ΔAIC': sfq.get('delta_aic'),
+            'SFQ SI': sfq.get('saturation_index'),
+            'SFQ Notes': sfq.get('notes', ''),
         }]
         df = pd.DataFrame(rows)
     else:
@@ -141,10 +153,18 @@ def _write_dose_response_sheet(writer: pd.ExcelWriter, data: Optional[Dict[str, 
             'QC Flag': [],
             'QC Score': [],
             'QC Message': [],
-            'QC Details': []
+            'QC Details': [],
+            'SFQ Status': [],
+            'SFQ Channel': [],
+            'SFQ Mode': [],
+            'SFQ EC50_app': [],
+            'SFQ Span (%)': [],
+            'SFQ ΔAIC': [],
+            'SFQ SI': [],
+            'SFQ Notes': []
         })
         df.loc[0] = ['No Dose-Response analysis run. Please navigate to Dose-Response tab and run analysis to generate EC50 data.',
-                     '', '', '', '', '', '', '', '', '', '', '']
+                     '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
 
     df.to_excel(writer, sheet_name='Dose_Response', index=False)
 

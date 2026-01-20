@@ -6,9 +6,41 @@
 
 ---
 
-## [Unreleased] - 2026-01-10
+## [Unreleased] - 2026-01-20
 
 ### Added
+- **Static Fluorescence Quenching/Enhancement (SFQ/SFE) Analysis**: Dose-Response标签页新增SFQ分析功能
+  - **核心功能**:
+    - 检测native state（低温窗口）荧光随配体浓度的系统性变化
+    - 区分Quenching（淬灭）和Enhancement（增强）两种模式
+    - 使用线性 vs 4PL模型对决（AIC比较）判定是否存在饱和信号
+    - 计算EC50_app（表观EC50）用于半定量分析
+  - **质量控制**:
+    - 动态范围检查（span ≥ 30%）
+    - 饱和指数（SI）评估高浓度平台期质量
+    - 三态输出：Not detected / Detected / Detected (caution)
+  - **SI算法改进**（v1.0实现）:
+    - 使用滑动窗口找最陡峭区域，比固定中间区域更准确
+    - 阈值调整：SI < 0.3（绿标）、0.3-0.6（黄标）、>0.6（警告）
+    - 原设计阈值（0.2/0.5）对高质量数据过严，已放宽
+  - **UI集成**:
+    - Dose-Response标签页下方折叠卡片
+    - 仅在330nm/350nm通道显示（ratio通道不支持）
+    - 自动展开显示分析结果
+    - 图例移至右侧避免遮挡数据
+  - **数据一致性**:
+    - SFQ分析使用与EC50拟合相同的数据点选择
+    - 用户在表格中取消选择的outlier点会被正确排除
+  - **导出支持**:
+    - Excel Dose_Response sheet新增SFQ字段
+    - 包含：Status, Channel, Mode, EC50_app, Span, ΔAIC, SI, Notes
+  - **实现文件**:
+    - 核心算法: `core/analysis/sfq_analysis.py`（新建）
+    - UI回调: `app/callbacks/dose_response_callbacks.py`（修改）
+    - 布局: `app/callbacks/tab_callbacks.py`（修改）
+    - 导出: `core/io/exporters/excel_exporter.py`（修改）
+  - **技术文档**: [SFQ_SFE.md](docs/SFQ_SFE.md)
+
 - **Complete Export Package Feature**: 一键导出所有分析结果和图表为ZIP包
   - **ZIP包内容**:
     - `QuantDSF_Results.xlsx`: 4-sheet Excel工作簿（Basic_Analysis, Dose_Response, Thermodynamics, Analysis_Settings）

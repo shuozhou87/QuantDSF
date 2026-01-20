@@ -4,15 +4,184 @@
 Dose-Response Analysis Callbacks
 ==================================
 Callbacks for Tm vs Concentration EC50 analysis
+Includes Static Fluorescence Quenching/Enhancement (SFQ/SFE) analysis
 """
 
 from dash import Dash, Input, Output, State, html, no_update, dash_table
 import dash_bootstrap_components as dbc
+from dash import dcc
 import plotly.graph_objects as go
 import numpy as np
 from core.analysis.dose_response_ec50 import fit_tm_ec50, hill4_tm
+from core.analysis.sfq_analysis import analyze_sfq_dataset, format_sfq_summary
 from core.qc import DoseResponseQualityController
 from core.qc.config import QCSettings
+
+
+def _create_sfq_default_content():
+    """Create default SFQ content when analysis not available"""
+    return html.P([
+        html.I(className="fas fa-info-circle me-2 text-muted"),
+        "SFQ analysis detects systematic changes in native-state fluorescence ",
+        "as a function of ligand concentration. Results appear here after running EC50 analysis."
+    ], className="text-muted mb-0")
+
+
+def _create_sfq_results_ui(sfq_result, channel):
+    """Create SFQ results UI components"""
+    if sfq_result is None:
+        if 'ratio' in channel.lower():
+            return html.Div([
+                dbc.Alert([
+                    html.I(className="fas fa-info-circle me-2"),
+                    "SFQ analysis is not available for ratio channel. ",
+                    "Please select 330nm or 350nm channel to enable this analysis."
+                ], color="info", className="mb-0")
+            ])
+        return html.Div([
+            dbc.Alert([
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                "Insufficient data for SFQ analysis (need at least 4 samples with valid concentrations)."
+            ], color="warning", className="mb-0")
+        ])
+
+    cr = sfq_result.channel_result
+    summary = format_sfq_summary(sfq_result)
+
+    # Determine status color
+    if cr.status == 'Not detected':
+        status_color = 'secondary'
+        status_icon = 'fas fa-minus-circle'
+    elif cr.status == 'Detected':
+        status_color = 'success'
+        status_icon = 'fas fa-check-circle'
+    else:  # Detected (caution)
+        status_color = 'warning'
+        status_icon = 'fas fa-exclamation-triangle'
+
+    # Create the plot
+    fig = go.Figure()
+
+    # Data points
+    fig.add_trace(go.Scatter(
+        x=sfq_result.concentrations,
+        y=sfq_result.cold_fluorescence,
+        mode='markers',
+        marker=dict(size=10, color='darkblue', line=dict(width=1, color='white')),
+        name=f'F{sfq_result.channel_name} Cold',
+        hovertemplate='Conc: %{x:.2e} M<br>F_cold: %{y:.0f}<extra></extra>'
+    ))
+
+    # Linear fit
+    conc_fit = np.logspace(
+        np.log10(min(sfq_result.concentrations)),
+        np.log10(max(sfq_result.concentrations)),
+        100
+    )
+    fig.add_trace(go.Scatter(
+        x=conc_fit,
+        y=sfq_result.linear_fit_y,
+        mode='lines',
+        line=dict(color='gray', width=2, dash='dash'),
+        name=f'Linear (R²={cr.r2_linear:.3f})'
+    ))
+
+    # 4PL fit (if available)
+    ec50_legend_name = None
+    if sfq_result.fourpl_fit_y:
+        fig.add_trace(go.Scatter(
+            x=conc_fit,
+            y=sfq_result.fourpl_fit_y,
+            mode='lines',
+            line=dict(color='red', width=3),
+            name=f'4PL (R²={cr.r2_4pl:.3f})'
+        ))
+
+        # EC50 vertical line (if detected) - no annotation, show in legend
+        if cr.ec50_app:
+            # Add EC50 line as a trace so it appears in legend
+            fig.add_trace(go.Scatter(
+                x=[cr.ec50_app, cr.ec50_app],
+                y=[min(sfq_result.cold_fluorescence) * 0.95, max(sfq_result.cold_fluorescence) * 1.05],
+                mode='lines',
+                line=dict(color='green', width=2, dash='dot'),
+                name=f'EC50_app = {cr.ec50_app_str}',
+                hovertemplate=f'EC50_app = {cr.ec50_app_str}<extra></extra>'
+            ))
+
+    fig.update_layout(
+        xaxis_type='log',
+        xaxis_title='Concentration (M)',
+        yaxis_title=f'Cold Fluorescence F{sfq_result.channel_name}',
+        title=f'Static Fluorescence Analysis (F{sfq_result.channel_name})',
+        template='plotly_white',
+        height=400,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=1.02,
+            bgcolor="rgba(255,255,255,0.8)"
+        ),
+        margin=dict(r=150)  # Make room for legend on right
+    )
+
+    # Build metrics table
+    metrics_rows = [
+        html.Tr([html.Td("Status"), html.Td(dbc.Badge(cr.status, color=status_color))]),
+        html.Tr([html.Td("Dynamic Range (span)"), html.Td(f"{cr.span:.1f}%")]),
+        html.Tr([html.Td("ΔAIC (linear - 4PL)"), html.Td(f"{cr.delta_aic:.1f}")]),
+    ]
+
+    if cr.saturation_index is not None:
+        metrics_rows.append(
+            html.Tr([html.Td("Saturation Index (SI)"), html.Td(f"{cr.saturation_index:.3f}")])
+        )
+
+    if cr.mode:
+        metrics_rows.append(html.Tr([html.Td("Mode"), html.Td(cr.mode)]))
+
+    if cr.ec50_app_str:
+        metrics_rows.append(html.Tr([html.Td("EC50_app"), html.Td(cr.ec50_app_str)]))
+
+    return html.Div([
+        # Summary alert
+        dbc.Alert([
+            html.I(className=f"{status_icon} me-2"),
+            summary
+        ], color=status_color, className="mb-3"),
+
+        dbc.Row([
+            # Plot
+            dbc.Col([
+                dcc.Graph(figure=fig, style={'height': '400px'})
+            ], md=8),
+
+            # Metrics
+            dbc.Col([
+                html.H6("Analysis Metrics", className="mb-2"),
+                dbc.Table([
+                    html.Tbody(metrics_rows)
+                ], bordered=True, hover=True, size='sm', className="mb-3"),
+
+                # Notes
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-lightbulb me-1 text-warning"),
+                        cr.notes
+                    ], className="text-muted")
+                ]) if cr.notes else None,
+
+                # Cross-channel hint
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        "For validation, consider checking SFQ behavior across channels (330/350)."
+                    ], className="text-muted mt-2")
+                ])
+            ], md=4)
+        ])
+    ])
 
 
 def register_dose_response_callbacks(app: Dash) -> None:
@@ -67,13 +236,16 @@ def register_dose_response_callbacks(app: Dash) -> None:
         Output('dr-ec50-results', 'children'),
         Output('dose-response-plot', 'figure'),
         Output('dose-response-store', 'data'),
+        Output('sfq-analysis-content', 'children'),
+        Output('sfq-collapse', 'is_open', allow_duplicate=True),
         Input('dr-run-btn', 'n_clicks'),
         State('analysis-results-store', 'data'),
         State('dr-selection-table', 'selected_rows'),
         State('dr-selection-table', 'data'),
+        State('channel-selector', 'value'),
         prevent_initial_call=True
     )
-    def run_dose_response_analysis(n_clicks, results_data, selected_rows, table_data):
+    def run_dose_response_analysis(n_clicks, results_data, selected_rows, table_data, channel):
         """Run dose-response EC50 analysis"""
         # Empty figure
         fig = go.Figure()
@@ -87,9 +259,13 @@ def register_dose_response_callbacks(app: Dash) -> None:
                 showarrow=False,
                 font=dict(size=14, color="gray")
             )
-            return html.Div([
-                dbc.Alert("No data available for analysis.", color="warning")
-            ]), fig, None
+            return (
+                html.Div([dbc.Alert("No data available for analysis.", color="warning")]),
+                fig,
+                None,
+                _create_sfq_default_content(),
+                False
+            )
 
         if not selected_rows or len(selected_rows) < 3:
             fig.add_annotation(
@@ -99,9 +275,13 @@ def register_dose_response_callbacks(app: Dash) -> None:
                 showarrow=False,
                 font=dict(size=14, color="gray")
             )
-            return html.Div([
-                dbc.Alert("Please select at least 3 data points with valid concentrations for EC50 fitting.", color="warning")
-            ]), fig, None
+            return (
+                html.Div([dbc.Alert("Please select at least 3 data points with valid concentrations for EC50 fitting.", color="warning")]),
+                fig,
+                None,
+                _create_sfq_default_content(),
+                False
+            )
 
         # Extract selected data
         # selected_rows contains the row indices directly corresponding to the results array
@@ -129,9 +309,13 @@ def register_dose_response_callbacks(app: Dash) -> None:
                 showarrow=False,
                 font=dict(size=14, color="gray")
             )
-            return html.Div([
-                dbc.Alert("Insufficient valid data points. Need at least 3 points with valid concentration and Tm.", color="danger")
-            ]), fig, None
+            return (
+                html.Div([dbc.Alert("Insufficient valid data points. Need at least 3 points with valid concentration and Tm.", color="danger")]),
+                fig,
+                None,
+                _create_sfq_default_content(),
+                False
+            )
 
         concentrations = np.array(concentrations)
         tm_values = np.array(tm_values)
@@ -147,9 +331,13 @@ def register_dose_response_callbacks(app: Dash) -> None:
                 showarrow=False,
                 font=dict(size=14, color="gray")
             )
-            return html.Div([
-                dbc.Alert("EC50 fitting failed. Check data quality and concentration range.", color="danger")
-            ]), fig, None
+            return (
+                html.Div([dbc.Alert("EC50 fitting failed. Check data quality and concentration range.", color="danger")]),
+                fig,
+                None,
+                _create_sfq_default_content(),
+                False
+            )
 
         # Run QC evaluation for dose-response analysis
         bottom = fit_result['bottom']
@@ -340,6 +528,59 @@ def register_dose_response_callbacks(app: Dash) -> None:
             ], bordered=True, hover=True, size='sm', className="mb-3")
         ])
 
+        # =====================================================
+        # SFQ/SFE Analysis (Static Fluorescence Quenching/Enhancement)
+        # =====================================================
+        print(f"[SFQ] Starting SFQ analysis, channel={channel}")
+        sfq_result = None
+        sfq_content = _create_sfq_default_content()
+        sfq_collapse_open = False
+
+        # Only run SFQ for 330 or 350 channels (not ratio)
+        if channel and 'ratio' not in channel.lower():
+            # Build sample list for SFQ analysis using ONLY selected rows (same as EC50)
+            sfq_samples = []
+            for row_idx in selected_rows:
+                if row_idx < len(results):
+                    r = results[row_idx]
+                    if r.get('concentration') and r.get('T') and r.get('F'):
+                        sfq_samples.append({
+                            'concentration': r['concentration'],
+                            'T': r['T'],
+                            'F': r['F'],
+                            'name': r.get('name', '')
+                        })
+
+            print(f"[SFQ] Found {len(sfq_samples)} samples with T/F data")
+
+            if len(sfq_samples) >= 4:
+                try:
+                    sfq_result = analyze_sfq_dataset(sfq_samples, channel)
+                    print(f"[SFQ] Analysis result: {sfq_result.dataset_status if sfq_result else 'None'}")
+                    sfq_content = _create_sfq_results_ui(sfq_result, channel)
+
+                    # Auto-expand card when SFQ analysis completes (regardless of result)
+                    sfq_collapse_open = True
+                    if sfq_result.dataset_status != 'Not detected':
+                        print(f"[SFQ] Detected! Auto-expanding card")
+                    else:
+                        print(f"[SFQ] Not detected, but showing results")
+                except Exception as e:
+                    print(f"[SFQ] Analysis error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    sfq_content = html.Div([
+                        dbc.Alert([
+                            html.I(className="fas fa-exclamation-triangle me-2"),
+                            f"SFQ analysis failed: {str(e)}"
+                        ], color="danger", className="mb-0")
+                    ])
+            else:
+                sfq_content = _create_sfq_results_ui(None, channel)
+        else:
+            # Ratio channel - show info message
+            sfq_content = _create_sfq_results_ui(None, channel or 'ratio')
+
         # Prepare data for storage
         dose_response_data = {
             'ec50': ec50,
@@ -356,7 +597,19 @@ def register_dose_response_callbacks(app: Dash) -> None:
             'qc_score': qc_metrics.score,
             'qc_tooltip': qc_metrics.tooltip if hasattr(qc_metrics, 'tooltip') else None,
             # Store figure for export
-            'figure': fig
+            'figure': fig,
+            # Store SFQ results for export
+            'sfq_result': {
+                'dataset_status': sfq_result.dataset_status if sfq_result else None,
+                'channel_name': sfq_result.channel_name if sfq_result else None,
+                'mode': sfq_result.channel_result.mode if sfq_result else None,
+                'ec50_app': sfq_result.channel_result.ec50_app if sfq_result else None,
+                'ec50_app_str': sfq_result.channel_result.ec50_app_str if sfq_result else None,
+                'span': sfq_result.channel_result.span if sfq_result else None,
+                'delta_aic': sfq_result.channel_result.delta_aic if sfq_result else None,
+                'saturation_index': sfq_result.channel_result.saturation_index if sfq_result else None,
+                'notes': sfq_result.channel_result.notes if sfq_result else None,
+            } if sfq_result else None
         }
 
-        return results_display, fig, dose_response_data
+        return results_display, fig, dose_response_data, sfq_content, sfq_collapse_open

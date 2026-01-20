@@ -19,6 +19,18 @@ def register_tab_callbacks(app: Dash) -> None:
     # Basic Analysis tab使用固定布局(在main_layout中定义),不需要动态渲染
 
     @app.callback(
+        Output('sfq-collapse', 'is_open'),
+        Input('sfq-card-header', 'n_clicks'),
+        State('sfq-collapse', 'is_open'),
+        prevent_initial_call=True
+    )
+    def toggle_sfq_collapse(n_clicks, is_open):
+        """Toggle SFQ analysis card collapse"""
+        if n_clicks:
+            return not is_open
+        return is_open
+
+    @app.callback(
         Output('tm-dist-column', 'style'),
         Output('melting-curves-column', 'md'),
         Output('melting-curves-plot', 'style'),
@@ -457,6 +469,28 @@ def _create_dose_response_content(results_data) -> html.Div:
                     style={'height': '500px'}
                 )
             ])
+        ], className="shadow-sm mb-4"),
+
+        # SFQ/SFE Analysis (collapsible card)
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-wave-square me-2"),
+                "Static Fluorescence Quenching / Enhancement (optional)",
+                dbc.Badge("Advanced", color="secondary", className="ms-2")
+            ], id="sfq-card-header", style={"cursor": "pointer"}),
+            dbc.Collapse(
+                dbc.CardBody([
+                    html.Div(id="sfq-analysis-content", children=[
+                        html.P([
+                            html.I(className="fas fa-info-circle me-2 text-muted"),
+                            "SFQ analysis detects systematic changes in native-state fluorescence ",
+                            "as a function of ligand concentration. Results appear here after running EC50 analysis."
+                        ], className="text-muted mb-0")
+                    ])
+                ]),
+                id="sfq-collapse",
+                is_open=False
+            )
         ], className="shadow-sm"),
 
     ], className="p-3")

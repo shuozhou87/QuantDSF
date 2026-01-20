@@ -23,6 +23,7 @@ QuantDSF v2 is a comprehensive desktop application for protein thermal stability
 - **Dose-Response Analysis**
   - Direct ligand titration analysis
   - EC₅₀ calculation from isothermal data
+  - **Static Fluorescence Quenching/Enhancement (SFQ/SFE)**: Detects systematic changes in native-state fluorescence with ligand concentration
 
 - **Quality Control**
   - Signal-to-Noise Ratio (SNR)
