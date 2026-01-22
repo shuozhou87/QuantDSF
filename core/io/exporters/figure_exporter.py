@@ -27,34 +27,40 @@ FIGURE_MAPPING = {
 }
 
 
-def export_plotly_to_png(
+def export_plotly_to_image(
     fig: go.Figure,
+    format: str = 'png',
     width: int = 1200,
     height: int = 800,
     scale: float = 2.5
 ) -> bytes:
     """
-    Export a Plotly figure to PNG bytes at 300 DPI.
+    Export a Plotly figure to PNG or PDF bytes.
 
     Args:
         fig: Plotly figure object
+        format: Output format ('png' or 'pdf')
         width: Width in pixels (default 1200)
         height: Height in pixels (default 800)
         scale: Scale factor for DPI (2.5 = 300 DPI at standard screen resolution)
 
     Returns:
-        PNG image as bytes
+        Image bytes in specified format
 
     Raises:
         ImportError: If kaleido is not installed
-        RuntimeError: If PNG export fails
+        RuntimeError: If image export fails
+        ValueError: If format is not supported
 
     Notes:
         - Requires kaleido library: `pip install kaleido`
         - Scale 2.5 with 1200x800 px = 300 DPI (publication quality)
-        - On Windows, kaleido should work out of box
-        - On Linux/Mac, may require Chrome/Chromium installed
+        - Supported formats: 'png', 'pdf'
+        - PDF format produces vector graphics (scalable, smaller file size)
     """
+    if format not in ['png', 'pdf']:
+        raise ValueError(f"Unsupported format: {format}. Use 'png' or 'pdf'.")
+
     try:
         # Use in-memory buffer
         img_bytes = io.BytesIO()
@@ -63,7 +69,7 @@ def export_plotly_to_png(
         # Scale controls DPI: 1.0 = 96 DPI, 2.5 = 240-300 DPI
         fig.write_image(
             img_bytes,
-            format='png',
+            format=format,
             width=width,
             height=height,
             scale=scale,
@@ -75,11 +81,34 @@ def export_plotly_to_png(
 
     except ImportError as e:
         raise ImportError(
-            "Kaleido library is required for PNG export. "
+            "Kaleido library is required for image export. "
             "Install with: pip install kaleido"
         ) from e
     except Exception as e:
-        raise RuntimeError(f"Failed to export figure to PNG: {str(e)}") from e
+        raise RuntimeError(f"Failed to export figure to {format.upper()}: {str(e)}") from e
+
+
+def export_plotly_to_png(
+    fig: go.Figure,
+    width: int = 1200,
+    height: int = 800,
+    scale: float = 2.5
+) -> bytes:
+    """
+    Export a Plotly figure to PNG bytes at 300 DPI.
+
+    Convenience wrapper around export_plotly_to_image(format='png').
+
+    Args:
+        fig: Plotly figure object
+        width: Width in pixels (default 1200)
+        height: Height in pixels (default 800)
+        scale: Scale factor for DPI (2.5 = 300 DPI)
+
+    Returns:
+        PNG image as bytes
+    """
+    return export_plotly_to_image(fig, format='png', width=width, height=height, scale=scale)
 
 
 def export_figure_by_id(

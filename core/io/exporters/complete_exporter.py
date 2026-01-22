@@ -24,6 +24,7 @@ import plotly.graph_objects as go
 
 from .excel_exporter import create_excel_workbook
 from .figure_exporter import export_figure_by_id, is_figure_empty
+from .pdf_report_exporter import create_pdf_report
 
 
 def create_complete_export_package(
@@ -219,3 +220,40 @@ def validate_export_data(
         'errors': errors,
         'can_export': True  # Always allow export
     }
+
+
+def create_pdf_export(
+    basic_data: Optional[Dict[str, Any]] = None,
+    dose_response_data: Optional[Dict[str, Any]] = None,
+    thermodynamics_data: Optional[Dict[str, Any]] = None,
+    settings_data: Optional[Dict[str, Any]] = None,
+    figures: Optional[Dict[str, go.Figure]] = None
+) -> tuple[bytes, str]:
+    """
+    Create PDF report export (alternative to ZIP package).
+
+    Args:
+        basic_data: Basic analysis results from analysis-results-store
+        dose_response_data: Dose-response results from dose-response-store
+        thermodynamics_data: Thermodynamics results from thermodynamics-store
+        settings_data: Analysis settings and metadata
+        figures: Dictionary of figure objects keyed by plot ID
+
+    Returns:
+        Tuple of (pdf_bytes, filename)
+
+    Example:
+        >>> pdf_bytes, filename = create_pdf_export(
+        ...     basic_data=basic_data,
+        ...     dose_response_data=dr_data,
+        ...     figures=figures
+        ... )
+        >>> # Returns: (b'%PDF-1.4...', 'QuantDSF_Report_20260120_143052.pdf')
+    """
+    return create_pdf_report(
+        basic_data=basic_data or {},
+        dose_response_data=dose_response_data or {},
+        thermodynamics_data=thermodynamics_data or {},
+        settings_data=settings_data or {},
+        figures=figures or {}
+    )
