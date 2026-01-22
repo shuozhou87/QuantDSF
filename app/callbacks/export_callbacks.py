@@ -11,7 +11,7 @@ from dash import Dash, Input, Output, State, dcc, callback_context
 from typing import Optional, Dict, Any
 import plotly.graph_objects as go
 
-from core.io.exporters import create_complete_export_package
+from core.io.exporters import create_complete_export_package, create_pdf_export
 
 
 def register_export_callbacks(app: Dash) -> None:
@@ -23,6 +23,9 @@ def register_export_callbacks(app: Dash) -> None:
         State('analysis-results-store', 'data'),
         State('dose-response-store', 'data'),
         State('thermodynamics-store', 'data'),
+        State('melting-curves-plot', 'figure'),
+        State('tm-distribution-plot', 'figure'),
+        State('dose-response-plot', 'figure'),
         State('method-selector', 'value'),
         State('channel-selector', 'value'),
         State('units-selector', 'value'),
@@ -38,6 +41,9 @@ def register_export_callbacks(app: Dash) -> None:
         basic_data,
         dose_response_data,
         thermodynamics_data,
+        melting_curves_fig,
+        tm_dist_fig,
+        dose_response_fig,
         method,
         channel,
         units,
@@ -48,16 +54,21 @@ def register_export_callbacks(app: Dash) -> None:
         vh_min_points
     ):
         """
-        Export complete analysis package (Excel + PNG figures) as ZIP.
+        Export complete analysis package as comprehensive PDF report.
 
-        Collects all analysis results and figures from the UI, packages them
-        into a timestamped ZIP file.
+        Collects all analysis results and figures from the UI and packages them
+        into a professional PDF report with all visualizations and QC details.
 
         Returns:
-            dcc.send_bytes: ZIP package download
+            dcc.send_bytes: PDF report download
         """
+        print(f"[EXPORT] Callback triggered: n_clicks={n_clicks}")
+
         if not n_clicks:
+            print("[EXPORT] No clicks yet, returning None")
             return None
+
+        print(f"[EXPORT] Starting PDF export process...")
 
         # Build settings data dictionary
         settings_data = {
@@ -78,42 +89,76 @@ def register_export_callbacks(app: Dash) -> None:
             }
         }
 
-        # Collect figures from stored data (where available)
+        # Collect figures from UI components
         figures = {}
 
-        # Dose-Response figure
-        if dose_response_data and 'figure' in dose_response_data:
+        # Basic analysis figures
+        if melting_curves_fig:
             try:
-                figures['dose-response-plot'] = go.Figure(dose_response_data['figure'])
-            except:
-                pass
+                figures['melting-curves-plot'] = go.Figure(melting_curves_fig)
+            except Exception as e:
+                print(f"Warning: Could not load melting curves figure: {e}")
 
-        # Thermodynamics figure
-        if thermodynamics_data and 'figure' in thermodynamics_data:
+        if tm_dist_fig:
             try:
-                figures['vanthoff-plot'] = go.Figure(thermodynamics_data['figure'])
-            except:
-                pass
+                figures['tm-distribution-plot'] = go.Figure(tm_dist_fig)
+            except Exception as e:
+                print(f"Warning: Could not load Tm distribution figure: {e}")
 
-        # Note: Basic analysis figures are not stored yet
-        # TODO: Store basic analysis figures (melting-curves-plot, tm-distribution-plot) in analysis-results-store
+        # Dose-response figures
+        if dose_response_fig:
+            try:
+                figures['dose-response-plot'] = go.Figure(dose_response_fig)
+            except Exception as e:
+                print(f"Warning: Could not load dose-response figure: {e}")
 
-        # Create export package
+        # SFQ figure (from dose_response_data store)
+        if dose_response_data and dose_response_data.get('sfq_figure'):
+            try:
+                figures['sfq-plot'] = go.Figure(dose_response_data['sfq_figure'])
+            except Exception as e:
+                print(f"Warning: Could not load SFQ figure: {e}")
+
+        # Thermodynamics figures (from thermodynamics_data store)
+        if thermodynamics_data:
+            # Van't Hoff plot
+            if thermodynamics_data.get('figure'):
+                try:
+                    figures['vanthoff-plot'] = go.Figure(thermodynamics_data['figure'])
+                except Exception as e:
+                    print(f"Warning: Could not load Van't Hoff figure: {e}")
+
+            # Overlay and isothermal plots (if stored)
+            if thermodynamics_data.get('overlay_figure'):
+                try:
+                    figures['vh-overlay-plot'] = go.Figure(thermodynamics_data['overlay_figure'])
+                except Exception as e:
+                    print(f"Warning: Could not load overlay figure: {e}")
+
+            if thermodynamics_data.get('isothermal_figure'):
+                try:
+                    figures['isothermal-panels-plot'] = go.Figure(thermodynamics_data['isothermal_figure'])
+                except Exception as e:
+                    print(f"Warning: Could not load isothermal figure: {e}")
+
+        # Generate PDF report
         try:
-            zip_bytes, zip_filename = create_complete_export_package(
+            print("[EXPORT] Generating PDF report...")
+            pdf_bytes, pdf_filename = create_pdf_export(
                 basic_data=basic_data,
                 dose_response_data=dose_response_data,
                 thermodynamics_data=thermodynamics_data,
                 settings_data=settings_data,
                 figures=figures
             )
-
-            # Return download
-            return dcc.send_bytes(zip_bytes, zip_filename)
+            print(f"[EXPORT] PDF generated: {pdf_filename} ({len(pdf_bytes)} bytes)")
+            return dcc.send_bytes(pdf_bytes, pdf_filename)
 
         except Exception as e:
             # Log error (in production, use proper logging)
-            print(f"Export error: {str(e)}")
+            print(f"[EXPORT] Error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
 
 

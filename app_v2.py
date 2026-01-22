@@ -19,7 +19,7 @@ from app import create_app
 def main():
     """主入口"""
     parser = argparse.ArgumentParser(description='QuantDSF v2 - nanoDSF Analysis Platform')
-    parser.add_argument('--port', type=int, default=8050, help='Port to run the server on')
+    parser.add_argument('--port', type=int, default=9050, help='Port to run the server on')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     parser.add_argument('--host', type=str, default='127.0.0.1', help='Host to bind to')
     args = parser.parse_args()

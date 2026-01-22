@@ -19,7 +19,7 @@ from .figure_exporter import (
     get_all_figure_mappings,
     FIGURE_MAPPING
 )
-from .complete_exporter import create_complete_export_package
+from .complete_exporter import create_complete_export_package, create_pdf_export
 
 __all__ = [
     # Excel export
@@ -34,6 +34,7 @@ __all__ = [
 
     # Complete package export
     'create_complete_export_package',
+    'create_pdf_export',
 ]
 
 

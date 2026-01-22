@@ -28,74 +28,81 @@ def _create_empty_figure(message: str):
 
 
 def _create_basic_analysis_initial_layout():
-    """创建Basic Analysis初始布局 - 固定结构,不再动态变化"""
+    """创建Basic Analysis初始布局 - Split-View架构: 表格区(上) + 图表区(下)"""
     return html.Div([
-        # 结果表格
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-table me-2"),
-                "Analysis Results",
-                dbc.Badge("0 samples", id="sample-count-badge", color="secondary", className="ms-2")
-            ]),
-            dbc.CardBody([
-                dcc.Loading(
-                    id="loading-results",
-                    type="default",
-                    fullscreen=False,
-                    children=html.Div(id="results-table-container", children=[
-                        html.P("Waiting for data...", className="text-muted text-center py-5")
-                    ]),
-                    overlay_style={"visibility": "visible", "opacity": 0.7, "filter": "blur(2px)"},
-                    custom_spinner=html.Div([
-                        dbc.Spinner(color="primary", size="lg", spinner_style={"width": "4rem", "height": "4rem"}),
-                        html.Div(id="loading-status-message",
-                                children="Analyzing data...",
-                                className="text-primary fw-bold mt-3",
-                                style={"fontSize": "1.3rem"})
-                    ], className="text-center", style={"paddingTop": "50px"})
-                )
-            ])
-        ], className="shadow-sm mb-4"),
+        # ==================== TABLE AREA (Top ~35vh) ====================
+        html.Div([
+            dbc.Card([
+                dbc.CardHeader([
+                    html.I(className="fas fa-table me-2"),
+                    "Analysis Results",
+                    dbc.Badge("0 samples", id="sample-count-badge", color="secondary", className="ms-2")
+                ]),
+                dbc.CardBody([
+                    dcc.Loading(
+                        id="loading-results",
+                        type="default",
+                        fullscreen=False,
+                        children=html.Div(id="results-table-container", children=[
+                            html.P("Waiting for data...", className="text-muted text-center py-5")
+                        ]),
+                        overlay_style={"visibility": "visible", "opacity": 0.7, "filter": "blur(2px)"},
+                        custom_spinner=html.Div([
+                            dbc.Spinner(color="primary", size="lg", spinner_style={"width": "4rem", "height": "4rem"}),
+                            html.Div(id="loading-status-message",
+                                    children="Analyzing data...",
+                                    className="text-primary fw-bold mt-3",
+                                    style={"fontSize": "1.3rem"})
+                        ], className="text-center", style={"paddingTop": "50px"})
+                    )
+                ], style={"maxHeight": "28vh", "overflowY": "auto"})
+            ], className="shadow-sm"),
+        ], style={"marginBottom": "1rem"}),
 
-        # 图表区域 - 固定布局
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader("📈 Melting Curves"),
-                    dbc.CardBody([
-                        dcc.Graph(
-                            id='melting-curves-plot',
-                            figure=_create_empty_figure("Upload data and run analysis"),
-                            style={'height': '400px'}
-                        )
-                    ])
-                ], className="shadow-sm mb-3"),
-
-                # First Derivative曲线面板 - 仅FD方法时显示
-                dbc.Card([
-                    dbc.CardHeader("📉 First Derivative Curves"),
-                    dbc.CardBody([
-                        dcc.Graph(
-                            id='derivative-curves-plot',
-                            figure=_create_empty_figure("Select First Derivative method"),
-                            style={'height': '400px'}
-                        )
-                    ])
-                ], id='derivative-panel', className="shadow-sm", style={'display': 'none'}),
-            ], id='melting-curves-column', md=6),
-
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader("📊 Tm Distribution"),
-                    dbc.CardBody([
-                        dcc.Graph(
-                            id='tm-distribution-plot',
-                            figure=_create_empty_figure("Upload data and run analysis"),
-                            style={'height': '400px'}
-                        )
-                    ])
-                ], className="shadow-sm")
-            ], id='tm-dist-column', md=6),
+        # ==================== PLOT AREA (Bottom ~60vh) ====================
+        html.Div([
+            dbc.Card([
+                dbc.CardBody([
+                    dbc.Tabs([
+                        # Tab 1: Melting Curves
+                        dbc.Tab(
+                            label="📈 Melting Curves",
+                            tab_id="plot-melting",
+                            children=html.Div([
+                                dcc.Graph(
+                                    id='melting-curves-plot',
+                                    figure=_create_empty_figure("Upload data and run analysis"),
+                                    style={'height': '55vh'}
+                                )
+                            ], id='melting-curves-column')
+                        ),
+                        # Tab 2: Tm Distribution
+                        dbc.Tab(
+                            label="📊 Tm Distribution",
+                            tab_id="plot-tm-dist",
+                            children=html.Div([
+                                dcc.Graph(
+                                    id='tm-distribution-plot',
+                                    figure=_create_empty_figure("Upload data and run analysis"),
+                                    style={'height': '55vh'}
+                                )
+                            ], id='tm-dist-column')
+                        ),
+                        # Tab 3: First Derivative (conditional)
+                        dbc.Tab(
+                            label="📉 First Derivative",
+                            tab_id="plot-derivative",
+                            children=html.Div([
+                                dcc.Graph(
+                                    id='derivative-curves-plot',
+                                    figure=_create_empty_figure("Select First Derivative method"),
+                                    style={'height': '55vh'}
+                                )
+                            ], id='derivative-panel')
+                        ),
+                    ], id="basic-plot-tabs", active_tab="plot-melting")
+                ], className="p-2")
+            ], className="shadow-sm"),
         ]),
     ], className="p-3")
 
@@ -140,16 +147,7 @@ def create_main_layout() -> dbc.Container:
             # 内容区
             dbc.Col([
                 # 页面标题
-                html.Div([
-                    html.H3([
-                        html.I(className="fas fa-chart-line me-2 text-primary"),
-                        "nanoDSF Analysis Platform"
-                    ], className="mb-1"),
-                    html.P(
-                        "High-throughput thermal stability and binding thermodynamics analysis",
-                        className="text-muted mb-4"
-                    )
-                ]),
+                # Page title removed (moved to Navbar)
                 
                 # 标签页
                 dbc.Tabs([

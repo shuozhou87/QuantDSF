@@ -6,9 +6,13 @@
 
 ---
 
-## [Unreleased] - 2026-01-20
+## [2.2.0] - Unreleased
 
 ### Added
+- **PDF Report Export**: New export functionality generating comprehensive PDF reports.
+  - Includes Title Page, Basic Analysis results, Figures, and QC Appendix.
+  - Replaces previous ZIP/Excel export mechanism.
+- **SFQ/SFE Documentation**: Added `docs/specs/SFQ_SFE.md` detailing Static Fluorescence Quenching analysis.
 - **Static Fluorescence Quenching/Enhancement (SFQ/SFE) Analysis**: Dose-Response标签页新增SFQ分析功能
   - **核心功能**:
     - 检测native state（低温窗口）荧光随配体浓度的系统性变化
@@ -82,6 +86,23 @@
   - **文档**: [QC_THERMODYNAMICS_INTEGRATION.md](docs/QC_THERMODYNAMICS_INTEGRATION.md)
 
 ### Changed
+- **Split-View UI Refactoring**: 重构所有三个分析标签页为 "Table Top / Plot Bottom" 布局
+  - **1:2 Split Layout**: 
+    - 上部 (~35vh): 可滚动的表格区域和控制面板
+    - 下部 (~55vh): 带有内部分页的图表区域
+  - **Basic Analysis Tab**: 
+    - 结果表格改为置顶滚动容器
+    - Melting Curves / Tm Distribution / First Derivative 改为底部标签页切换
+  - **Thermodynamic Analysis Tab**:
+    - 参数栏和数据选择表格置顶
+    - Metric Cards (ΔH, ΔS, R²) 移至表格下方
+    - Van't Hoff Plot / AUC Overlay 改为底部标签页切换
+  - **Dose-Response Tab**:
+    - 数据选择表格和EC50计算按钮置顶
+    - 结果卡片 (EC50, 95% CI) 整合在顶部区域
+    - Dose-Response Curve / SFQ Analysis 改为底部标签页切换
+  - **交互优化**: 增加表格默认每页显示行数至30行，减少翻页操作
+
 - **放宽热力学参数合理性检查**: 避免误判有效数据
   - **ΔH检查** (`core/qc/thermo_qc.py:283-301`):
     - 旧标准: -1000 to -5 kJ/mol（严格范围）
@@ -102,6 +123,14 @@
   - 位置: `app/components/sidebar.py:119-131`
 
 ### Fixed
+- **[UI Bug] Result Persistence**: 修复切换标签页后计算结果丢失的问题
+  - 范围：Thermodynamic Analysis 和 Dose-Response Analysis
+  - 修复：利用 `dcc.Store` 持久化存储结果，并在标签页重新渲染时从存储恢复UI状态，避免重新计算或丢失数据
+
+- **[UI Bug] Thermodynamic Analysis Initial Results**: 修复热力学分析标签页在未点击运行按钮前自动显示错误初始结果的问题
+  - 原因：Dashboard回调在Tab切换时自动触发计算
+  - 修复：添加显式检查，确保仅在点击按钮后运行计算
+
 - **恢复浓度排序和Status tooltip功能**: 修复之前丢失的表格功能
   - **浓度排序**: 表格按浓度从低到高自动排序，无浓度样本排在最后
   - **Status tooltip**: 鼠标悬停在⚠️上显示具体原因

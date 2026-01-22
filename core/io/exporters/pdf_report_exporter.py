@@ -36,28 +36,55 @@ QC_COLORS = {
 }
 
 
-def _figure_to_image(fig: go.Figure, width: int = 600, height: int = 400) -> Optional[Image]:
+def _figure_to_image(fig: go.Figure, width_cm: float = 16, height_cm: float = 10) -> Optional[Image]:
     """
-    Convert Plotly figure to ReportLab Image object.
+    Convert Plotly figure to ReportLab Image - preserves web layout exactly as displayed.
+
+    Strategy: Use web-native dimensions with high scale factor for print quality.
+    This ensures "what you see is what you get" - PDF matches web appearance.
 
     Args:
         fig: Plotly figure object
-        width: Image width in pixels
-        height: Image height in pixels
+        width_cm: Image width in centimeters (for PDF layout)
+        height_cm: Image height in centimeters (for PDF layout)
 
     Returns:
         ReportLab Image object or None if conversion fails
     """
-    try:
-        # Export figure to PNG bytes using kaleido
-        img_bytes = fig.to_image(format='png', width=width, height=height, scale=2.5)
+    if fig is None:
+        print(f"[PDF Export] Warning: Received None figure")
+        return None
 
-        # Create ReportLab Image from bytes
+    try:
+        # Use web-native pixel dimensions (matches what user sees in browser)
+        # These are the typical sizes used in the web UI
+        web_width_px = 1200   # Standard web figure width
+        web_height_px = 700   # Standard web figure height
+
+        # Use higher scale factor (4.0) for better readability in print
+        # This creates larger, crisper text and lines
+        scale_factor = 4.0
+
+        # Export figure to PNG using web dimensions + high scale
+        # This gives us: layout from web (compact, readable) + quality for print
+        print(f"[PDF Export] Converting figure: {web_width_px}x{web_height_px}px @ scale={scale_factor} (4800x2800 actual pixels)...")
+        img_bytes = fig.to_image(
+            format='png',
+            width=web_width_px,
+            height=web_height_px,
+            scale=scale_factor  # 4x scale = 4800x2800 actual pixels
+        )
+        print(f"[PDF Export] Successfully generated {len(img_bytes)} bytes")
+
+        # Create ReportLab Image from bytes with specified physical size
+        # The physical size controls how large it appears on the PDF page
         img_buffer = io.BytesIO(img_bytes)
-        img = Image(img_buffer, width=width/72*inch, height=height/72*inch)
+        img = Image(img_buffer, width=width_cm*cm, height=height_cm*cm)
         return img
     except Exception as e:
         print(f"[PDF Export] Warning: Failed to convert figure to image: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -144,22 +171,33 @@ def _generate_title_page(settings_data: Dict, styles: Any) -> List:
     story.append(title)
     story.append(Spacer(1, 1*cm))
 
+    # Extract settings from nested structure
+    basic_settings = settings_data.get('basic_analysis', {})
+    thermo_settings = settings_data.get('thermodynamics', {})
+
     # Report metadata
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     meta_data = [
         ['Report Generated', timestamp],
-        ['Analysis Method', settings_data.get('method', 'N/A')],
-        ['Fluorescence Channel', settings_data.get('channel', 'N/A')],
-        ['QC Enabled', 'Yes' if settings_data.get('qc_enabled', False) else 'No'],
+        ['Analysis Method', basic_settings.get('method', 'N/A').upper()],
+        ['Fluorescence Channel', f"F{basic_settings.get('channel', 'N/A')}"],
     ]
 
-    # Add uploaded files if available
-    if settings_data.get('uploaded_files'):
-        files = ', '.join(settings_data['uploaded_files'])
-        meta_data.append(['Data Files', files])
+    # Add thermodynamics settings if available
+    if thermo_settings:
+        meta_data.append(['Temperature Units', thermo_settings.get('units', 'Celsius')])
 
     meta_table = _create_table(meta_data, col_widths=[6, 10], header_row=False)
     story.append(meta_table)
+    story.append(Spacer(1, 1*cm))
+
+    # Add note about QC
+    qc_note = Paragraph(
+        "<i>Note: Quality control metrics are integrated throughout this report. "
+        "See Appendix for detailed QC information.</i>",
+        styles['Normal']
+    )
+    story.append(qc_note)
     story.append(PageBreak())
 
     return story
@@ -207,7 +245,7 @@ def _generate_basic_analysis_section(basic_data: Dict, figures: Dict, styles: An
     if 'melting-curves-plot' in figures:
         story.append(Paragraph("<b>Melting Curves</b>", styles['Heading2']))
         story.append(Spacer(1, 0.2*cm))
-        img = _figure_to_image(figures['melting-curves-plot'], width=720, height=480)
+        img = _figure_to_image(figures['melting-curves-plot'], width_cm=17, height_cm=11)
         if img:
             story.append(img)
         story.append(PageBreak())
@@ -216,7 +254,7 @@ def _generate_basic_analysis_section(basic_data: Dict, figures: Dict, styles: An
     if 'tm-distribution-plot' in figures:
         story.append(Paragraph("<b>Tm Distribution</b>", styles['Heading2']))
         story.append(Spacer(1, 0.2*cm))
-        img = _figure_to_image(figures['tm-distribution-plot'], width=720, height=480)
+        img = _figure_to_image(figures['tm-distribution-plot'], width_cm=17, height_cm=11)
         if img:
             story.append(img)
         story.append(PageBreak())
@@ -256,7 +294,7 @@ def _generate_dose_response_section(dose_response_data: Dict, figures: Dict, sty
     if 'dose-response-plot' in figures:
         story.append(Paragraph("<b>Dose-Response Curve</b>", styles['Heading2']))
         story.append(Spacer(1, 0.2*cm))
-        img = _figure_to_image(figures['dose-response-plot'], width=720, height=480)
+        img = _figure_to_image(figures['dose-response-plot'], width_cm=17, height_cm=11)
         if img:
             story.append(img)
         story.append(PageBreak())
@@ -283,6 +321,15 @@ def _generate_dose_response_section(dose_response_data: Dict, figures: Dict, sty
         if sfq.get('notes'):
             story.append(Spacer(1, 0.3*cm))
             story.append(Paragraph(f"<i>Note: {sfq['notes']}</i>", styles['Normal']))
+
+        # SFQ figure
+        if 'sfq-plot' in figures:
+            story.append(Spacer(1, 0.5*cm))
+            story.append(Paragraph("<b>SFQ/SFE Analysis Plot</b>", styles['Heading2']))
+            story.append(Spacer(1, 0.2*cm))
+            img = _figure_to_image(figures['sfq-plot'], width_cm=17, height_cm=11)
+            if img:
+                story.append(img)
 
         story.append(PageBreak())
 
@@ -320,7 +367,7 @@ def _generate_thermodynamics_section(thermodynamics_data: Dict, figures: Dict, s
     if 'vanthoff-plot' in figures:
         story.append(Paragraph("<b>Van't Hoff Plot</b>", styles['Heading2']))
         story.append(Spacer(1, 0.2*cm))
-        img = _figure_to_image(figures['vanthoff-plot'], width=720, height=480)
+        img = _figure_to_image(figures['vanthoff-plot'], width_cm=17, height_cm=11)
         if img:
             story.append(img)
         story.append(PageBreak())
@@ -329,7 +376,7 @@ def _generate_thermodynamics_section(thermodynamics_data: Dict, figures: Dict, s
     if 'vh-overlay-plot' in figures:
         story.append(Paragraph("<b>Overlay Analysis</b>", styles['Heading2']))
         story.append(Spacer(1, 0.2*cm))
-        img = _figure_to_image(figures['vh-overlay-plot'], width=720, height=480)
+        img = _figure_to_image(figures['vh-overlay-plot'], width_cm=17, height_cm=11)
         if img:
             story.append(img)
         story.append(PageBreak())
@@ -338,7 +385,7 @@ def _generate_thermodynamics_section(thermodynamics_data: Dict, figures: Dict, s
     if 'isothermal-panels-plot' in figures:
         story.append(Paragraph("<b>Isothermal Dose-Response Panels</b>", styles['Heading2']))
         story.append(Spacer(1, 0.2*cm))
-        img = _figure_to_image(figures['isothermal-panels-plot'], width=720, height=480)
+        img = _figure_to_image(figures['isothermal-panels-plot'], width_cm=17, height_cm=11)
         if img:
             story.append(img)
         story.append(PageBreak())
@@ -484,6 +531,11 @@ def create_pdf_report(
     Returns:
         Tuple of (pdf_bytes, filename)
     """
+    # DEBUG: Print what figures we received
+    print(f"[PDF Export] Received {len(figures)} figures:")
+    for fig_id in figures.keys():
+        print(f"  - {fig_id}")
+
     # Create PDF buffer
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(

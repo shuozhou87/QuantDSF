@@ -70,3 +70,36 @@ def register_file_callbacks(app: Dash) -> None:
         # 新上传数据时，重置分析结果
         return status, file_list, None
 
+    @app.callback(
+        Output('upload-data', 'contents', allow_duplicate=True),
+        Output('upload-data', 'filename', allow_duplicate=True),
+        Input('load-test-data-btn', 'n_clicks'),
+        prevent_initial_call=True
+    )
+    def load_test_data(n_clicks):
+        """加载测试数据集用于调试"""
+        if not n_clicks:
+            return no_update, no_update
+        
+        import os
+        # 测试数据路径
+        test_file_path = "/Users/shuozhou/Library/CloudStorage/OneDrive-UTHealthSanAntonio/QuantDSF/QuantDSF/SampleDataSets/DOSE/RPA+SSDNA_13406_DOSE.zip"
+        
+        if not os.path.exists(test_file_path):
+            print(f"[ERROR] Test file not found: {test_file_path}")
+            return no_update, no_update
+        
+        try:
+            with open(test_file_path, 'rb') as f:
+                file_content = f.read()
+            
+            # Encode as base64 for Dash upload component
+            encoded = base64.b64encode(file_content).decode('utf-8')
+            content_string = f"data:application/zip;base64,{encoded}"
+            
+            print(f"[DEBUG] Loaded test file: {os.path.basename(test_file_path)}")
+            return [content_string], ["RPA+SSDNA_13406_DOSE.zip"]
+        except Exception as e:
+            print(f"[ERROR] Failed to load test file: {e}")
+            return no_update, no_update
+

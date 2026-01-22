@@ -16,8 +16,11 @@ def create_navbar() -> dbc.Navbar:
         dbc.Container([
             html.A(
                 dbc.Row([
-                    dbc.Col(html.I(className="fas fa-flask fa-lg")),
-                    dbc.Col(dbc.NavbarBrand("QuantDSF v2", className="ms-2 fw-bold")),
+                    dbc.Col(html.I(className="fas fa-flask fa-2x text-white")),
+                    dbc.Col([
+                        html.Span("QuantDSF", className="fw-bold text-white", style={"fontSize": "2.5rem", "lineHeight": "1"}),
+                        html.Span("nanoDSF Analysis Platform", className="text-white-50 ms-3 text-nowrap", style={"fontSize": "1.1rem", "whiteSpace": "nowrap"})
+                    ], className="d-flex align-items-baseline ms-3 text-nowrap"),
                 ], align="center", className="g-0"),
                 href="/",
                 style={"textDecoration": "none"},

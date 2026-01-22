@@ -30,28 +30,8 @@ def register_tab_callbacks(app: Dash) -> None:
             return not is_open
         return is_open
 
-    @app.callback(
-        Output('tm-dist-column', 'style'),
-        Output('melting-curves-column', 'md'),
-        Output('melting-curves-plot', 'style'),
-        Input('analysis-results-store', 'data'),
-    )
-    def update_layout_based_on_data(results_data):
-        """根据数据类型动态调整布局"""
-        if not results_data or not results_data.get('results'):
-            # 无数据:默认布局
-            return {}, 6, {'height': '400px'}
-
-        results = results_data['results']
-        valid_conc_count = sum(1 for r in results if r.get('concentration') is not None)
-        is_dose_response = valid_conc_count >= 3
-
-        if is_dose_response:
-            # 浓度梯度:隐藏Tm Distribution,Melting Curves全宽
-            return {'display': 'none'}, 12, {'height': '500px'}
-        else:
-            # 普通样品:显示两个图
-            return {}, 6, {'height': '400px'}
+    # Note: Basic Analysis tab now uses tabbed plot layout instead of side-by-side.
+    # The old update_layout_based_on_data callback is no longer needed.
     
     @app.callback(
         Output('thermo-analysis-content', 'children'),
@@ -185,7 +165,7 @@ def _create_basic_analysis_content(results_data) -> html.Div:
 
 
 def _create_thermo_analysis_content(results_data) -> html.Div:
-    """创建热力学分析内容"""
+    """创建热力学分析内容 - Split-View架构: 表格区(上) + 图表区(下)"""
     
     has_data = results_data and results_data.get('results')
     has_concentration = has_data and any(r.get('concentration') for r in results_data['results'])
@@ -210,289 +190,300 @@ def _create_thermo_analysis_content(results_data) -> html.Div:
             ], className="shadow-sm"),
         ], className="p-3")
     
-    # 有浓度数据时显示完整界面
+    # 有浓度数据时显示完整界面 - Split-View架构
     return html.Div([
-        dbc.Alert([
-            html.I(className="fas fa-info-circle me-2"),
-            "Select data points for Van't Hoff analysis and enter protein concentration to run"
-        ], color="info", className="mb-4"),
-        
-        # 蛋白浓度输入 / 温度窗口 / 方法
-        dbc.Card([
-            dbc.CardHeader("⚙️ Analysis Parameters"),
-            dbc.CardBody([
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Label("Protein Concentration (nM)"),
-                        dbc.Input(
-                            id="protein-conc-input",
-                            type="number",
-                            value=100,
-                            min=0.1,
-                            step=0.1
-                        )
-                    ], md=4),
-                    dbc.Col([
-                        dbc.Label("Temperature slices (°C)"),
-                        dcc.RangeSlider(
-                            id="vh-temp-slice-range",
-                            min=20,
-                            max=100,
-                            step=0.5,
-                            value=[30, 80],
-                            tooltip={"placement": "bottom", "always_visible": False}
+        # ==================== TABLE AREA (Top ~35vh) ====================
+        html.Div([
+            # 分析参数 (紧凑行)
+            dbc.Card([
+                dbc.CardBody([
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Label("Protein Conc (nM)", className="small mb-1"),
+                            dbc.Input(
+                                id="protein-conc-input",
+                                type="number",
+                                value=100,
+                                min=0.1,
+                                step=0.1,
+                                size="sm"
+                            )
+                        ], md=2),
+                        dbc.Col([
+                            dbc.Label("Temperature Slices (°C)", className="small mb-1"),
+                            dcc.RangeSlider(
+                                id="vh-temp-slice-range",
+                                min=20,
+                                max=100,
+                                step=0.5,
+                                value=[30, 80],
+                                tooltip={"placement": "bottom", "always_visible": False}
+                            ),
+                            html.Div(id="vh-temp-range-label", className="text-muted small")
+                        ], md=5),
+                        dbc.Col([
+                            dbc.Label("Method", className="small mb-1"),
+                            dbc.RadioItems(
+                                id="vh-method-selector",
+                                options=[
+                                    {"label": "Auto-optimize", "value": "optimize"},
+                                    {"label": "All points", "value": "all"},
+                                ],
+                                value="optimize",
+                                inline=True,
+                                className="small"
+                            )
+                        ], md=3),
+                        dbc.Col([
+                            dbc.Button(
+                                [html.I(className="fas fa-play me-1"), "Run Van't Hoff"],
+                                id="run-vanthoff-btn",
+                                color="primary",
+                                size="sm",
+                                className="mt-4"
+                            )
+                        ], md=2),
+                    ], className="align-items-center"),
+                ], className="py-2")
+            ], className="shadow-sm mb-2"),
+            
+            # 数据表格区 - 带Tabs (Data Selection | Isothermal EC50/KD)
+            dbc.Card([
+                dbc.CardBody([
+                    dbc.Tabs([
+                        # Tab 1: Data Selection
+                        dbc.Tab(
+                            label="📋 Data Selection",
+                            tab_id="thermo-data-selection",
+                            children=html.Div([
+                                html.Div([
+                                    html.I(className="fas fa-check-square me-2"),
+                                    html.Span(id="vh-selection-hint", className="text-muted small")
+                                ], className="mb-2"),
+                                dash_table.DataTable(
+                                    id='vh-selection-table',
+                                    columns=[
+                                        {"name": "Sample", "id": "name"},
+                                        {"name": "Conc (nM)", "id": "conc_nM"},
+                                        {"name": "Tm (°C)", "id": "tm"},
+                                        {"name": "R²", "id": "r2"},
+                                        {"name": "Method", "id": "method"},
+                                        {"name": "Status", "id": "quality"},
+                                    ],
+                                    data=[],
+                                    row_selectable="multi",
+                                    selected_rows=[],
+                                    page_size=30,
+                                    style_table={"overflowX": "auto", "maxHeight": "15vh", "overflowY": "auto"},
+                                    style_cell={"padding": "4px", "fontSize": 11},
+                                    style_header={"fontWeight": "bold", "fontSize": 11},
+                                )
+                            ], className="p-1")
                         ),
-                        html.Div(id="vh-temp-range-label", className="text-muted small mt-1")
-                    ], md=5),
-                    dbc.Col([
-                        dbc.Label("Method"),
-                        dbc.RadioItems(
-                            id="vh-method-selector",
-                            options=[
-                                {"label": "Auto-optimize low-T subset", "value": "optimize"},
-                                {"label": "Use all points", "value": "all"},
-                            ],
-                            value="optimize",
-                            inline=True
-                        )
-                    ], md=3),
-                ]),
-                html.Hr(),
-                dbc.Button(
-                    [html.I(className="fas fa-play me-2"), "Run Van't Hoff Analysis"],
-                    id="run-vanthoff-btn",
-                    color="primary"
-                )
-            ])
-        ], className="shadow-sm mb-4"),
+                        # Tab 2: Isothermal EC50/KD Table
+                        dbc.Tab(
+                            label="📊 Isothermal EC50/KD",
+                            tab_id="thermo-isothermal-tab",
+                            children=html.Div([
+                                dash_table.DataTable(
+                                    id='isothermal-ec50-table',
+                                    columns=[
+                                        {"name": "Temp (°C)", "id": "temp"},
+                                        {"name": "EC50", "id": "ec50"},
+                                        {"name": "KD", "id": "kd"},
+                                        {"name": "Dynamic Range", "id": "dr"},
+                                        {"name": "4PL R²", "id": "r2"},
+                                        {"name": "Points", "id": "n_points"},
+                                    ],
+                                    data=[],
+                                    page_size=30,
+                                    style_table={"overflowX": "auto", "maxHeight": "15vh", "overflowY": "auto"},
+                                    style_cell={"padding": "4px", "fontSize": 11},
+                                    style_header={"fontWeight": "bold", "fontSize": 11},
+                                )
+                            ], className="p-1")
+                        ),
+                    ], id="thermo-table-tabs", active_tab="thermo-data-selection")
+                ], className="p-2")
+            ], className="shadow-sm mb-2"),
+            
+            # 热力学参数卡片 (紧凑行)
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div("ΔH", className="text-muted small"),
+                            html.Div(id="vh-delta-h", children="-- kJ/mol", className="text-primary fw-bold")
+                        ], className="py-1 px-2 text-center")
+                    ], className="shadow-sm h-100")
+                ], xs=6, md=2),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div("ΔS", className="text-muted small"),
+                            html.Div(id="vh-delta-s", children="-- J/mol·K", className="text-success fw-bold")
+                        ], className="py-1 px-2 text-center")
+                    ], className="shadow-sm h-100")
+                ], xs=6, md=2),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div("R²", className="text-muted small"),
+                            html.Div(id="vh-r2", children="--", className="text-warning fw-bold")
+                        ], className="py-1 px-2 text-center")
+                    ], className="shadow-sm h-100")
+                ], xs=6, md=2),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div("KD (298K)", className="text-muted small"),
+                            html.Div(id="vh-kd-298", children="-- nM", className="text-info fw-bold")
+                        ], className="py-1 px-2 text-center")
+                    ], className="shadow-sm h-100")
+                ], xs=6, md=3),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div("KD (310K)", className="text-muted small"),
+                            html.Div(id="vh-kd-310", children="-- nM", className="text-info fw-bold")
+                        ], className="py-1 px-2 text-center")
+                    ], className="shadow-sm h-100")
+                ], xs=6, md=3),
+            ], className="g-2 mb-2"),
+        ], style={"marginBottom": "0.5rem"}),
 
-        # 数据点选择
-        dbc.Card([
-            dbc.CardHeader("🔎 Data Selection for Van't Hoff"),
-            dbc.CardBody([
-                html.Div(id="vh-selection-hint", className="text-muted small mb-2"),
-                dash_table.DataTable(
-                    id='vh-selection-table',
-                    columns=[
-                        {"name": "Sample", "id": "name"},
-                        {"name": "Concentration (nM)", "id": "conc_nM"},
-                        {"name": "Tm (°C)", "id": "tm"},
-                        {"name": "R²", "id": "r2"},
-                        {"name": "Method", "id": "method"},
-                        {"name": "Status", "id": "quality"},
-                    ],
-                    data=[],
-                    row_selectable="multi",
-                    selected_rows=[],
-                    page_size=20,
-                    style_table={"overflowX": "auto"},
-                    style_cell={"padding": "6px", "fontSize": 12},
-                    style_header={"fontWeight": "bold"},
-                )
-            ])
-        ], className="shadow-sm mb-4"),
-        
-        # 热力学参数卡片
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("ΔH", className="text-muted mb-1"),
-                        html.H3(id="vh-delta-h", children="-- kJ/mol", className="text-primary mb-0")
-                    ])
-                ], className="shadow-sm text-center")
-            ], md=3),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("ΔS", className="text-muted mb-1"),
-                        html.H3(id="vh-delta-s", children="-- J/mol·K", className="text-success mb-0")
-                    ])
-                ], className="shadow-sm text-center")
-            ], md=3),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("KD (298K)", className="text-muted mb-1"),
-                        html.H3(id="vh-kd-298", children="-- nM", className="text-info mb-0")
-                    ])
-                ], className="shadow-sm text-center")
-            ], md=3),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("KD (310K / 37°C)", className="text-muted mb-1"),
-                        html.H3(id="vh-kd-310", children="-- nM", className="text-info mb-0")
-                    ])
-                ], className="shadow-sm text-center")
-            ], md=3),
-        ], className="mb-3"),
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("R²", className="text-muted mb-1"),
-                        html.H3(id="vh-r2", children="--", className="text-warning mb-0")
-                    ])
-                ], className="shadow-sm text-center")
-            ], md=3),
-        ], className="mb-4"),
-        
-        # Van't Hoff 图
-        dbc.Card([
-            dbc.CardHeader("📈 Van't Hoff Plot"),
-            dbc.CardBody([
-                dcc.Graph(id='vanthoff-plot', style={'height': '450px'}),
-                # QC 状态卡片
-                html.Div(id="thermo-qc-status-container", className="mt-3")
-            ])
-        ], className="shadow-sm mb-4"),
-
-        # 归一化曲线叠加
-        dbc.Card([
-            dbc.CardHeader("📊 Normalized AUC Overlay (temperature slices)"),
-            dbc.CardBody([
-                dcc.Graph(id='vh-overlay-plot', style={'height': '450px'})
-            ])
-        ], className="shadow-sm mb-4"),
-
-        # 等温 EC50 / KD 表
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-table me-2"),
-                "Isothermal EC50 / KD Table"
-            ]),
-            dbc.CardBody([
-                dash_table.DataTable(
-                    id='isothermal-ec50-table',
-                    columns=[
-                        {"name": "Temp (°C)", "id": "temp"},
-                        {"name": "EC50", "id": "ec50"},
-                        {"name": "KD", "id": "kd"},
-                        {"name": "Dynamic Range", "id": "dr"},
-                        {"name": "4PL R²", "id": "r2"},
-                        {"name": "Points", "id": "n_points"},
-                    ],
-                    data=[],
-                    page_size=25,
-                    style_table={"overflowX": "auto"},
-                    style_cell={"padding": "6px", "fontSize": 12},
-                    style_header={"fontWeight": "bold"},
-                )
-            ])
-        ], className="shadow-sm"),
+        # ==================== PLOT AREA (Bottom ~55vh) ====================
+        html.Div([
+            dbc.Card([
+                dbc.CardBody([
+                    dbc.Tabs([
+                        # Tab 1: Van't Hoff Plot
+                        dbc.Tab(
+                            label="📈 Van't Hoff Plot",
+                            tab_id="thermo-vanthoff",
+                            children=html.Div([
+                                dcc.Graph(id='vanthoff-plot', style={'height': '48vh'}),
+                                html.Div(id="thermo-qc-status-container", className="mt-2")
+                            ])
+                        ),
+                        # Tab 2: Overlay Plot
+                        dbc.Tab(
+                            label="📊 AUC Overlay",
+                            tab_id="thermo-overlay",
+                            children=html.Div([
+                                dcc.Graph(id='vh-overlay-plot', style={'height': '50vh'})
+                            ])
+                        ),
+                    ], id="thermo-plot-tabs", active_tab="thermo-vanthoff")
+                ], className="p-2")
+            ], className="shadow-sm"),
+        ]),
         
     ], className="p-3")
 
 
 def _create_dose_response_content(results_data) -> html.Div:
-    """创建剂量响应内容"""
-    print("[DEBUG] _create_dose_response_content called")
-
+    """创建剂量响应内容 - Split-View架构: 表格区(上) + 图表区(下)"""
+    
     return html.Div([
-        dbc.Alert([
-            html.I(className="fas fa-chart-line me-2"),
-            "Dose-Response EC50 Analysis - Fit Tm vs Concentration with 4PL curve"
-        ], color="info", className="mb-4"),
-
-        # Data selection table
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-check-square me-2"),
-                "1️⃣ Select Data Points for EC50 Fitting"
-            ]),
-            dbc.CardBody([
-                dbc.Alert(
-                    "💡 Select samples to include in EC50 fitting. Need at least 3 points with valid concentration and Tm.",
-                    color="info",
-                    className="py-2 mb-3"
-                ),
-                html.Div(id="dr-selection-hint", className="text-muted small mb-2"),
-                dash_table.DataTable(
-                    id='dr-selection-table',
-                    columns=[
-                        {"name": "Sample", "id": "name"},
-                        {"name": "Concentration (nM)", "id": "conc_nM"},
-                        {"name": "Tm (°C)", "id": "tm"},
-                        {"name": "R²", "id": "r2"},
-                        {"name": "Method", "id": "method"},
-                        {"name": "Status", "id": "quality"},
-                    ],
-                    data=[],
-                    row_selectable="multi",
-                    selected_rows=[],
-                    page_size=20,
-                    style_table={"overflowX": "auto"},
-                    style_cell={"padding": "6px", "fontSize": 12},
-                    style_header={"fontWeight": "bold"},
-                )
-            ])
-        ], className="shadow-sm mb-4"),
-
-        # Run button
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-play me-2"),
-                "2️⃣ Run EC50 Analysis"
-            ]),
-            dbc.CardBody([
-                dbc.Button(
-                    [html.I(className="fas fa-calculator me-2"), "Calculate EC50"],
-                    id="dr-run-btn",
-                    color="primary",
-                    size="lg",
-                    className="w-100"
-                )
-            ])
-        ], className="shadow-sm mb-4"),
-
-        # Results display
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-chart-bar me-2"),
-                "3️⃣ EC50 Results"
-            ]),
-            dbc.CardBody([
-                html.Div(id="dr-ec50-results", children=[
-                    html.P("Click 'Calculate EC50' to see results...", className="text-muted text-center py-3")
-                ])
-            ])
-        ], className="shadow-sm mb-4"),
-
-        # Dose-response plot
-        dbc.Card([
-            dbc.CardHeader("📈 Dose-Response Curve"),
-            dbc.CardBody([
-                dcc.Graph(
-                    id='dose-response-plot',
-                    figure=_create_empty_figure("Run analysis to see dose-response curve"),
-                    style={'height': '500px'}
-                )
-            ])
-        ], className="shadow-sm mb-4"),
-
-        # SFQ/SFE Analysis (collapsible card)
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-wave-square me-2"),
-                "Static Fluorescence Quenching / Enhancement (optional)",
-                dbc.Badge("Advanced", color="secondary", className="ms-2")
-            ], id="sfq-card-header", style={"cursor": "pointer"}),
-            dbc.Collapse(
+        # ==================== TABLE AREA (Top ~35vh) ====================
+        html.Div([
+            # 表格区 - 带Tabs (Data Selection | Results & QC)
+            dbc.Card([
                 dbc.CardBody([
-                    html.Div(id="sfq-analysis-content", children=[
-                        html.P([
-                            html.I(className="fas fa-info-circle me-2 text-muted"),
-                            "SFQ analysis detects systematic changes in native-state fluorescence ",
-                            "as a function of ligand concentration. Results appear here after running EC50 analysis."
-                        ], className="text-muted mb-0")
-                    ])
-                ]),
-                id="sfq-collapse",
-                is_open=False
-            )
-        ], className="shadow-sm"),
+                    dbc.Tabs([
+                        # Tab 1: Data Selection
+                        dbc.Tab(
+                            label="📋 Data Selection",
+                            tab_id="dr-data-selection",
+                            children=html.Div([
+                                html.Div([
+                                    html.I(className="fas fa-check-square me-2"),
+                                    html.Span(id="dr-selection-hint", className="text-muted small"),
+                                    dbc.Button(
+                                        [html.I(className="fas fa-calculator me-1"), "Calculate EC50"],
+                                        id="dr-run-btn",
+                                        color="primary",
+                                        size="sm",
+                                        className="float-end"
+                                    )
+                                ], className="mb-2"),
+                                dash_table.DataTable(
+                                    id='dr-selection-table',
+                                    columns=[
+                                        {"name": "Sample", "id": "name"},
+                                        {"name": "Conc (nM)", "id": "conc_nM"},
+                                        {"name": "Tm (°C)", "id": "tm"},
+                                        {"name": "R²", "id": "r2"},
+                                        {"name": "Method", "id": "method"},
+                                        {"name": "Status", "id": "quality"},
+                                    ],
+                                    data=[],
+                                    row_selectable="multi",
+                                    selected_rows=[],
+                                    page_size=30,
+                                    style_table={"overflowX": "auto", "maxHeight": "22vh", "overflowY": "auto"},
+                                    style_cell={"padding": "4px", "fontSize": 11},
+                                    style_header={"fontWeight": "bold", "fontSize": 11},
+                                )
+                            ], className="p-1")
+                        ),
+                        # Tab 2: Results & QC
+                        dbc.Tab(
+                            label="📊 Results & QC",
+                            tab_id="dr-results-qc",
+                            children=html.Div([
+                                html.Div(id="dr-ec50-results", children=[
+                                    html.P("Run EC50 analysis to see results...", 
+                                           className="text-muted text-center py-4")
+                                ])
+                            ], className="p-1", style={"maxHeight": "22vh", "overflowY": "auto"})
+                        ),
+                    ], id="dr-table-tabs", active_tab="dr-data-selection")
+                ], className="p-2")
+            ], className="shadow-sm mb-2"),
+        ], style={"marginBottom": "0.5rem"}),
 
+        # ==================== PLOT AREA (Bottom ~60vh) ====================
+        html.Div([
+            dbc.Card([
+                dbc.CardBody([
+                    dbc.Tabs([
+                        # Tab 1: Dose-Response Curve
+                        dbc.Tab(
+                            label="📈 Dose-Response Curve",
+                            tab_id="dr-curve",
+                            children=html.Div([
+                                dcc.Graph(
+                                    id='dose-response-plot',
+                                    figure=_create_empty_figure("Run analysis to see dose-response curve"),
+                                    style={'height': '55vh'}
+                                )
+                            ])
+                        ),
+                        # Tab 2: SFQ/SFE Analysis
+                        dbc.Tab(
+                            label="🔬 SFQ/SFE Analysis",
+                            tab_id="dr-sfq",
+                            children=html.Div([
+                                html.Div(id="sfq-analysis-content", children=[
+                                    dbc.Alert([
+                                        html.I(className="fas fa-info-circle me-2"),
+                                        "SFQ analysis detects systematic changes in native-state fluorescence ",
+                                        "as a function of ligand concentration. Results appear here after running EC50 analysis."
+                                    ], color="info", className="mt-3")
+                                ])
+                            ])
+                        ),
+                    ], id="dr-plot-tabs", active_tab="dr-curve")
+                ], className="p-2")
+            ], className="shadow-sm"),
+        ]),
+        
+        # Hidden elements for SFQ collapse (keep for callback compatibility)
+        html.Div(id="sfq-card-header", style={"display": "none"}),
+        html.Div(id="sfq-collapse", style={"display": "none"}),
+        
     ], className="p-3")
 
 

@@ -27,6 +27,81 @@ def _create_sfq_default_content():
     ], className="text-muted mb-0")
 
 
+def _create_sfq_figure(sfq_result):
+    """Create SFQ analysis figure (separate from UI)"""
+    if sfq_result is None:
+        return None
+
+    cr = sfq_result.channel_result
+
+    # Create the plot
+    fig = go.Figure()
+
+    # Data points
+    fig.add_trace(go.Scatter(
+        x=sfq_result.concentrations,
+        y=sfq_result.cold_fluorescence,
+        mode='markers',
+        marker=dict(size=10, color='darkblue', line=dict(width=1, color='white')),
+        name=f'F{sfq_result.channel_name} Cold',
+        hovertemplate='Conc: %{x:.2e} M<br>F_cold: %{y:.0f}<extra></extra>'
+    ))
+
+    # Linear fit
+    conc_fit = np.logspace(
+        np.log10(min(sfq_result.concentrations)),
+        np.log10(max(sfq_result.concentrations)),
+        100
+    )
+    fig.add_trace(go.Scatter(
+        x=conc_fit,
+        y=sfq_result.linear_fit_y,
+        mode='lines',
+        line=dict(color='gray', width=2, dash='dash'),
+        name=f'Linear (R²={cr.r2_linear:.3f})'
+    ))
+
+    # 4PL fit (if available)
+    if sfq_result.fourpl_fit_y:
+        fig.add_trace(go.Scatter(
+            x=conc_fit,
+            y=sfq_result.fourpl_fit_y,
+            mode='lines',
+            line=dict(color='red', width=3),
+            name=f'4PL (R²={cr.r2_4pl:.3f})'
+        ))
+
+        # EC50 vertical line (if detected)
+        if cr.ec50_app:
+            fig.add_trace(go.Scatter(
+                x=[cr.ec50_app, cr.ec50_app],
+                y=[min(sfq_result.cold_fluorescence) * 0.95, max(sfq_result.cold_fluorescence) * 1.05],
+                mode='lines',
+                line=dict(color='green', width=2, dash='dot'),
+                name=f'EC50_app = {cr.ec50_app_str}',
+                hovertemplate=f'EC50_app = {cr.ec50_app_str}<extra></extra>'
+            ))
+
+    fig.update_layout(
+        xaxis_type='log',
+        xaxis_title='Concentration (M)',
+        yaxis_title=f'Cold Fluorescence F{sfq_result.channel_name}',
+        title=f'Static Fluorescence Analysis (F{sfq_result.channel_name})',
+        template='plotly_white',
+        height=400,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=1.02,
+            bgcolor="rgba(255,255,255,0.8)"
+        ),
+        margin=dict(r=150)
+    )
+
+    return fig
+
+
 def _create_sfq_results_ui(sfq_result, channel):
     """Create SFQ results UI components"""
     if sfq_result is None:
@@ -59,72 +134,8 @@ def _create_sfq_results_ui(sfq_result, channel):
         status_color = 'warning'
         status_icon = 'fas fa-exclamation-triangle'
 
-    # Create the plot
-    fig = go.Figure()
-
-    # Data points
-    fig.add_trace(go.Scatter(
-        x=sfq_result.concentrations,
-        y=sfq_result.cold_fluorescence,
-        mode='markers',
-        marker=dict(size=10, color='darkblue', line=dict(width=1, color='white')),
-        name=f'F{sfq_result.channel_name} Cold',
-        hovertemplate='Conc: %{x:.2e} M<br>F_cold: %{y:.0f}<extra></extra>'
-    ))
-
-    # Linear fit
-    conc_fit = np.logspace(
-        np.log10(min(sfq_result.concentrations)),
-        np.log10(max(sfq_result.concentrations)),
-        100
-    )
-    fig.add_trace(go.Scatter(
-        x=conc_fit,
-        y=sfq_result.linear_fit_y,
-        mode='lines',
-        line=dict(color='gray', width=2, dash='dash'),
-        name=f'Linear (R²={cr.r2_linear:.3f})'
-    ))
-
-    # 4PL fit (if available)
-    ec50_legend_name = None
-    if sfq_result.fourpl_fit_y:
-        fig.add_trace(go.Scatter(
-            x=conc_fit,
-            y=sfq_result.fourpl_fit_y,
-            mode='lines',
-            line=dict(color='red', width=3),
-            name=f'4PL (R²={cr.r2_4pl:.3f})'
-        ))
-
-        # EC50 vertical line (if detected) - no annotation, show in legend
-        if cr.ec50_app:
-            # Add EC50 line as a trace so it appears in legend
-            fig.add_trace(go.Scatter(
-                x=[cr.ec50_app, cr.ec50_app],
-                y=[min(sfq_result.cold_fluorescence) * 0.95, max(sfq_result.cold_fluorescence) * 1.05],
-                mode='lines',
-                line=dict(color='green', width=2, dash='dot'),
-                name=f'EC50_app = {cr.ec50_app_str}',
-                hovertemplate=f'EC50_app = {cr.ec50_app_str}<extra></extra>'
-            ))
-
-    fig.update_layout(
-        xaxis_type='log',
-        xaxis_title='Concentration (M)',
-        yaxis_title=f'Cold Fluorescence F{sfq_result.channel_name}',
-        title=f'Static Fluorescence Analysis (F{sfq_result.channel_name})',
-        template='plotly_white',
-        height=400,
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=1.02,
-            bgcolor="rgba(255,255,255,0.8)"
-        ),
-        margin=dict(r=150)  # Make room for legend on right
-    )
+    # Create figure using shared function
+    fig = _create_sfq_figure(sfq_result)
 
     # Build metrics table
     metrics_rows = [
@@ -171,6 +182,220 @@ def _create_sfq_results_ui(sfq_result, channel):
                         cr.notes
                     ], className="text-muted")
                 ]) if cr.notes else None,
+
+                # Cross-channel hint
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        "For validation, consider checking SFQ behavior across channels (330/350)."
+                    ], className="text-muted mt-2")
+                ])
+            ], md=4)
+        ])
+    ])
+
+
+def _create_ec50_results_ui_from_data(data):
+    """Reconstruct EC50 results display from stored dictionary"""
+    if not data or 'ec50' not in data:
+        return html.Div()
+
+    ec50 = data['ec50']
+    fit_result = {
+        'ec50_ci': data.get('ec50_ci', [0, 0]),
+        'r2': data.get('r2', 0),
+        'bottom': data.get('bottom', 0),
+        'top': data.get('top', 0),
+        'hill_slope': data.get('hill_slope', 0)
+    }
+    
+    ec50_str = f"{ec50:.2e} M"
+    if ec50 >= 1e-6:
+        ec50_str += f" ({ec50*1e6:.2f} µM)"
+    elif ec50 >= 1e-9:
+        ec50_str += f" ({ec50*1e9:.2f} nM)"
+
+    ci_str = f"{fit_result['ec50_ci'][0]:.2e} - {fit_result['ec50_ci'][1]:.2e} M"
+    
+    qc_flag = data.get('qc_flag', '')
+    qc_message = data.get('qc_message', '')
+    qc_score = data.get('qc_score', 0)
+    qc_tooltip = data.get('qc_tooltip', '')
+
+    if qc_flag == '✅':
+        qc_color = 'success'
+        qc_badge_color = 'success'
+    elif qc_flag == '⚠️':
+        qc_color = 'warning'
+        qc_badge_color = 'warning'
+    else:
+        qc_color = 'danger'
+        qc_badge_color = 'danger'
+
+    # Recalculate derived metrics for display
+    dynamic_range_degc = abs(fit_result['top'] - fit_result['bottom'])
+    tm_values = np.array(data.get('tm_values', []))
+    data_coverage_pct = 0.0
+    if len(tm_values) > 0 and dynamic_range_degc > 0:
+        experimental_range = tm_values.max() - tm_values.min()
+        data_coverage_pct = (experimental_range / dynamic_range_degc) * 100.0
+
+    return html.Div([
+        dbc.Alert("✅ EC50 Analysis Complete (Restored)", color="success", className="mb-3"),
+
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6("EC50", className="text-muted mb-1"),
+                        html.H4(ec50_str, className="text-primary mb-0")
+                    ])
+                ], className="shadow-sm text-center mb-2")
+            ], md=4),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6("95% CI", className="text-muted mb-1"),
+                        html.H6(ci_str, className="text-success mb-0", style={"fontSize": "14px"})
+                    ])
+                ], className="shadow-sm text-center mb-2")
+            ], md=4),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6("R²", className="text-muted mb-1"),
+                        html.H4(f"{fit_result['r2']:.4f}", className="text-info mb-0")
+                    ])
+                ], className="shadow-sm text-center mb-2")
+            ], md=4),
+        ]),
+
+        html.Hr(),
+
+        # QC Summary
+        dbc.Alert([
+            html.Div([
+                html.Span("Quality: ", className="fw-bold"),
+                dbc.Badge(qc_flag, color=qc_badge_color, className="me-2"),
+                html.Span(f"Score: {qc_score:.1f}/100", className="text-muted small")
+            ]),
+            html.Div([
+                html.Small(qc_message, className="text-muted")
+            ], className="mt-1") if qc_message else None,
+            html.Div([
+                html.Small(qc_tooltip, className="mt-2 d-block")
+            ]) if qc_tooltip else None
+        ], color=qc_color, className="mb-3"),
+
+        html.H6("Fitting Parameters", className="mt-3 mb-2"),
+        dbc.Table([
+            html.Thead([
+                html.Tr([
+                    html.Th("Parameter"),
+                    html.Th("Value")
+                ])
+            ]),
+            html.Tbody([
+                html.Tr([
+                    html.Td("Bottom (Tm0)"),
+                    html.Td(f"{fit_result['bottom']:.2f} °C")
+                ]),
+                html.Tr([
+                    html.Td("Top (Tm∞)"),
+                    html.Td(f"{fit_result['top']:.2f} °C")
+                ]),
+                html.Tr([
+                    html.Td("Hill Slope"),
+                    html.Td(f"{fit_result['hill_slope']:.3f}")
+                ]),
+                html.Tr([
+                    html.Td("Data Points"),
+                    html.Td(f"{data.get('n_points', 0)}")
+                ]),
+                html.Tr([
+                    html.Td("Dynamic Range (Top-Bottom)"),
+                    html.Td(f"{dynamic_range_degc:.2f} °C")
+                ]),
+                html.Tr([
+                    html.Td("Data Coverage"),
+                    html.Td(f"{data_coverage_pct:.1f}%")
+                ])
+            ])
+        ], bordered=True, hover=True, size='sm', className="mb-3")
+    ])
+
+
+def _create_sfq_results_ui_from_data(sfq_result_dict, sfq_figure):
+    """Reconstruct SFQ results UI from stored dictionary"""
+    if not sfq_result_dict:
+        return _create_sfq_default_content()
+
+    status = sfq_result_dict.get('dataset_status', 'Not detected')
+    
+    # Determine status color
+    if status == 'Not detected':
+        status_color = 'secondary'
+        status_icon = 'fas fa-minus-circle'
+    elif status == 'Detected':
+        status_color = 'success'
+        status_icon = 'fas fa-check-circle'
+    else:  # Detected (caution)
+        status_color = 'warning'
+        status_icon = 'fas fa-exclamation-triangle'
+
+    # Reconstruct summary text roughly or use stored values
+    # We'll just build a basic summary string if we can't fully reconstruct format_sfq_summary
+    summary = f"SFQ Effect: {status}"
+    if sfq_result_dict.get('mode'):
+        summary += f" ({sfq_result_dict['mode']})"
+
+    # Build metrics table rows
+    metrics_rows = [
+        html.Tr([html.Td("Status"), html.Td(dbc.Badge(status, color=status_color))]),
+        html.Tr([html.Td("Dynamic Range (span)"), html.Td(f"{sfq_result_dict.get('span', 0):.1f}%")]),
+        html.Tr([html.Td("ΔAIC (linear - 4PL)"), html.Td(f"{sfq_result_dict.get('delta_aic', 0):.1f}")]),
+    ]
+
+    if sfq_result_dict.get('saturation_index') is not None:
+        metrics_rows.append(
+            html.Tr([html.Td("Saturation Index (SI)"), html.Td(f"{sfq_result_dict['saturation_index']:.3f}")])
+        )
+
+    if sfq_result_dict.get('mode'):
+        metrics_rows.append(html.Tr([html.Td("Mode"), html.Td(sfq_result_dict['mode'])]))
+
+    if sfq_result_dict.get('ec50_app_str'):
+        metrics_rows.append(html.Tr([html.Td("EC50_app"), html.Td(sfq_result_dict['ec50_app_str'])]))
+
+    notes = sfq_result_dict.get('notes')
+
+    return html.Div([
+        # Summary alert
+        dbc.Alert([
+            html.I(className=f"{status_icon} me-2"),
+            summary
+        ], color=status_color, className="mb-3"),
+
+        dbc.Row([
+            # Plot
+            dbc.Col([
+                dcc.Graph(figure=sfq_figure, style={'height': '400px'}) if sfq_figure else html.Div("No Figure")
+            ], md=8),
+
+            # Metrics
+            dbc.Col([
+                html.H6("Analysis Metrics", className="mb-2"),
+                dbc.Table([
+                    html.Tbody(metrics_rows)
+                ], bordered=True, hover=True, size='sm', className="mb-3"),
+
+                # Notes
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-lightbulb me-1 text-warning"),
+                        notes
+                    ], className="text-muted")
+                ]) if notes else None,
 
                 # Cross-channel hint
                 html.Div([
@@ -243,13 +468,36 @@ def register_dose_response_callbacks(app: Dash) -> None:
         State('dr-selection-table', 'selected_rows'),
         State('dr-selection-table', 'data'),
         State('channel-selector', 'value'),
-        prevent_initial_call=True
+        State('dose-response-store', 'data'), # Added store state
+        prevent_initial_call='initial_duplicate' # Changed to 'initial_duplicate' to allow restore AND duplicate output
     )
-    def run_dose_response_analysis(n_clicks, results_data, selected_rows, table_data, channel):
+    def run_dose_response_analysis(n_clicks, results_data, selected_rows, table_data, channel, existing_dr_data):
         """Run dose-response EC50 analysis"""
         # Empty figure
         fig = go.Figure()
         fig.update_layout(template='plotly_white')
+
+        # Check for restore first
+        if not n_clicks or n_clicks == 0:
+            if existing_dr_data and existing_dr_data.get('ec50') is not None:
+                 # Restore
+                 results_ui = _create_ec50_results_ui_from_data(existing_dr_data)
+                 stored_fig = existing_dr_data.get('figure', fig)
+                 sfq_ui = _create_sfq_results_ui_from_data(existing_dr_data.get('sfq_result'), existing_dr_data.get('sfq_figure'))
+                 
+                 sfq_open = True if existing_dr_data.get('sfq_result') else False
+                 
+                 return results_ui, stored_fig, no_update, sfq_ui, sfq_open
+            
+            # Initial state
+            # If nothing stored, return empty placeholders
+            return (
+                html.Div(), 
+                fig, 
+                no_update, 
+                _create_sfq_default_content(), 
+                False
+            )
 
         if not results_data or not results_data.get('results'):
             fig.add_annotation(
@@ -598,6 +846,8 @@ def register_dose_response_callbacks(app: Dash) -> None:
             'qc_tooltip': qc_metrics.tooltip if hasattr(qc_metrics, 'tooltip') else None,
             # Store figure for export
             'figure': fig,
+            # Store SFQ figure for export (if available)
+            'sfq_figure': _create_sfq_figure(sfq_result) if sfq_result else None,
             # Store SFQ results for export
             'sfq_result': {
                 'dataset_status': sfq_result.dataset_status if sfq_result else None,

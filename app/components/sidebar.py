@@ -76,7 +76,23 @@ def _create_file_upload_section() -> html.Div:
         ),
         html.Div(id='upload-status', className="mt-2 text-muted small"),
         html.Div(id='loaded-files-list', className="mt-2"),
+        
+        # Test Data Button (for development/debugging)
+        dbc.Button(
+            [html.I(className="fas fa-flask me-1"), "Load Test Data"],
+            id='load-test-data-btn',
+            color="secondary",
+            outline=True,
+            size="sm",
+            className="w-100 mt-2"
+        ),
+        dbc.Tooltip(
+            "Load RPA+SSDNA_13406_DOSE.zip for automated testing",
+            target="load-test-data-btn",
+            placement="bottom"
+        ),
     ], className="mb-4")
+
 
 
 def _create_method_settings() -> html.Div:
@@ -266,8 +282,11 @@ def _create_action_buttons() -> html.Div:
             className="w-100 mb-3"
         ),
 
+        html.Hr(),
+        html.H6("Export", className="text-muted mb-2"),
+
         dbc.Button(
-            [html.I(className="fas fa-download me-2"), "Export Results"],
+            [html.I(className="fas fa-file-pdf me-2"), "Export PDF Report"],
             id='export-btn',
             color="success",
             outline=True,

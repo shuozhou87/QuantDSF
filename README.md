@@ -23,7 +23,10 @@ QuantDSF v2 is a comprehensive desktop application for protein thermal stability
 - **Dose-Response Analysis**
   - Direct ligand titration analysis
   - EC₅₀ calculation from isothermal data
-  - **Static Fluorescence Quenching/Enhancement (SFQ/SFE)**: Detects systematic changes in native-state fluorescence with ligand concentration
+  - **Static Fluorescence Quenching/Enhancement (SFQ/SFE)**
+    - Detects systematic changes in native-state fluorescence with ligand concentration
+    - Distinguishes between Quenching and Enhancement modes
+    - Validates binding using Linear vs. 4PL model comparison (AIC)
 
 - **Quality Control**
   - Signal-to-Noise Ratio (SNR)
@@ -54,12 +57,19 @@ QuantDSF/
 │   ├── models/           # Data models (Pydantic)
 │   ├── analysis/         # Analysis algorithms
 │   │   ├── tm/          # Tm calculation methods
-│   │   ├── thermodynamic/  # Thermodynamic analysis
-│   │   └── ...
-│   ├── io/              # Data I/O
-│   │   ├── parsers/     # Instrument data parsers
-│   │   └── exporters/   # Result exporters
+│   │   ├── thermodynamic/  # Van't Hoff & Single-Curve
+│   │   └── sfq_analysis.py # SFQ analysis
+│   ├── qc/              # Quality Control System
+│   ├── database/        # Data Persistence (SQLite)
+│   ├── io/              # Data I/O (Parsers & Exporters)
 │   └── utils/           # Utility functions
+│
+├── docs/                # Documentation
+│   ├── specs/           # Technical Specifications
+│   ├── guides/          # User & Developer Guides
+│   ├── background/      # Scientific Background
+│   ├── archive/         # Archived Reports
+│   └── INDEX.md         # Documentation Navigation
 │
 ├── app_v2.py            # Web application entry point
 └── requirements_v2.txt  # Python dependencies
@@ -107,20 +117,13 @@ python app_v2.py
 
 Then open your browser to `http://localhost:8050`
 
+
 ## Documentation
 
-Comprehensive documentation is available in the `docs/` directory.
+Full documentation is available in the **[Documentation Index](docs/INDEX.md)**.
 
-### Quick Links
-- **[Documentation Index](docs/README.md)** - Complete documentation navigation
-- **[CHANGELOG.md](CHANGELOG.md)** - Version history and updates
-- **[Why QuantDSF?](docs/WHY_QUANTDSF.md)** - Project motivation
+For developers contributing to the project, please refer to the **[Developer Guide](docs/guides/DEVELOPER_GUIDE.md)**.
 
-### Key Documents
-- [Architecture Proposal](docs/V2_ARCHITECTURE_PROPOSAL.md) - System design
-- [Multicore Parallelization](docs/MULTICORE_PARALLELIZATION.md) - Performance optimization
-- [Single-Curve Thermodynamics](docs/SINGLE_CURVE_THERMODYNAMICS.md) - Core innovation
-- [Developer Guide](docs/DEVELOPER_GUIDE.md) - Contributing to the project
 
 ## Technical Highlights
 
@@ -166,4 +169,4 @@ For issues, feature requests, or questions, please open an issue on GitHub or co
 
 ## Contributing
 
-Contributions are welcome! Please read the developer guide in `docs/DEVELOPER_GUIDE.md` for details on our code style, testing practices, and pull request process.
+Contributions are welcome! Please read the developer guide in `docs/guides/DEVELOPER_GUIDE.md` for details on our code style, testing practices, and pull request process.

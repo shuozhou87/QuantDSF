@@ -124,6 +124,52 @@ def register_thermo_callbacks(app: Dash) -> None:
             html.Ul(detail_items, className="mb-0 small")
         ], color=card_color, className="mt-3")
 
+    def _create_qc_status_card_from_data(stored_data: dict) -> html.Div:
+        """Create QC status card from stored data dictionary.
+        
+        This is used when restoring results after tab switch.
+        """
+        if not stored_data:
+            return html.Div()
+        
+        flag = stored_data.get('qc_flag', '')
+        message = stored_data.get('qc_message', '')
+        details = stored_data.get('qc_details', {})
+        
+        if not flag:
+            return html.Div()
+        
+        # Map flag to color
+        color_map = {
+            '✅': 'success',
+            '⚠️': 'warning',
+            '❌': 'danger'
+        }
+        card_color = color_map.get(flag, 'secondary')
+        
+        # Build simplified detail list from stored data
+        detail_items = []
+        if details:
+            # Van't Hoff regression quality
+            if 'vh_r2' in details:
+                detail_items.append(
+                    html.Li([
+                        html.Strong("Van't Hoff Regression: "),
+                        f"R² = {details.get('vh_r2', 0):.3f}, ",
+                        f"n = {details.get('vh_n_points', 0)} points"
+                    ])
+                )
+        
+        return dbc.Alert([
+            html.H5([
+                html.Span(flag, className="me-2"),
+                "Quality Control Assessment"
+            ], className="alert-heading"),
+            html.Hr(),
+            html.P(message, className="mb-2"),
+            html.Ul(detail_items, className="mb-0 small") if detail_items else html.Div()
+        ], color=card_color, className="mt-3")
+
     def _format_kd(kd_molar: float) -> str:
         """自适应 KD 单位格式化"""
         if kd_molar is None or not np.isfinite(kd_molar) or kd_molar <= 0:
@@ -305,12 +351,49 @@ def register_thermo_callbacks(app: Dash) -> None:
         State('vh-selection-table', 'selected_rows'),
         State('vh-selection-table', 'data'),
         State('isothermal-ec50-table', 'data'),
-        prevent_initial_call=True
+        State('thermodynamics-store', 'data'),  # Add store as State to restore on tab switch
+        prevent_initial_call=False
     )
-    def run_vanthoff_analysis(n_clicks, protein_conc, method, units, temp_slice_range, results_data, selected_rows, table_data, iso_table_data):
+    def run_vanthoff_analysis(n_clicks, protein_conc, method, units, temp_slice_range, results_data, selected_rows, table_data, iso_table_data, existing_thermo_data):
         """运行 Van't Hoff 分析"""
         # 创建空图表
         fig = go.Figure()
+        
+        # IMPORTANT: Check if button was clicked vs. just tab switch with existing data
+        # When n_clicks is None/0, we might be switching tabs - check if we have stored results
+        if not n_clicks or n_clicks == 0:
+            # Check if we have existing data from a previous calculation
+            if existing_thermo_data and existing_thermo_data.get('delta_h') is not None:
+                # Restore from stored data - user previously ran the analysis
+                stored_fig = existing_thermo_data.get('figure')
+                if stored_fig:
+                    # Rebuild QC card from stored data
+                    qc_card = html.Div()  # Default empty
+                    if existing_thermo_data.get('qc_flag'):
+                        qc_card = _create_qc_status_card_from_data(existing_thermo_data)
+                    
+                    # Return stored values, use no_update for store to keep data
+                    return (
+                        stored_fig,
+                        f"{existing_thermo_data.get('delta_h_display', '--'):.1f} {existing_thermo_data.get('delta_h_unit', 'kJ/mol')}" if isinstance(existing_thermo_data.get('delta_h_display'), (int, float)) else "-- kJ/mol",
+                        f"{existing_thermo_data.get('delta_s_display', '--'):.1f} {existing_thermo_data.get('delta_s_unit', 'J/mol·K')}" if isinstance(existing_thermo_data.get('delta_s_display'), (int, float)) else "-- J/mol·K",
+                        _format_kd(existing_thermo_data.get('kd_298k')),
+                        _format_kd(existing_thermo_data.get('kd_310k')),
+                        f"{existing_thermo_data.get('r2', 0):.4f}" if existing_thermo_data.get('r2') else "--",
+                        qc_card,
+                        no_update  # Don't modify the store
+                    )
+            
+            # No stored data - show placeholder
+            fig.add_annotation(
+                text="Click 'Run Van't Hoff Analysis' to calculate thermodynamic parameters",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(template='plotly_white')
+            return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "-- nM", "--", html.Div(), no_update
 
         # 解析蛋白浓度（支持 M / nM / µM 输入）
         protein_conc = _parse_protein_conc_to_m(protein_conc)

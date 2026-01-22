@@ -177,101 +177,53 @@ Samples are rejected if:
 
 ## Output Specifications
 
-### 2.1 Interactive Results Table
+### 2.1 PDF Analysis Report
 
-#### **Displayed Columns**
+QuantDSF generates a comprehensive, publication-ready PDF report containing all analysis results, high-resolution figures, and detailed QC metrics.
 
-| Column | Description | Format | Example |
-|--------|-------------|--------|---------|
-| **Sample** | Cleaned sample name | String | "BSA" |
-| **Concentration (M)** | Ligand concentration | Scientific notation or "—" | 1.00e-5 or "—" |
-| **Tm (°C)** | Melting temperature | 2 decimal places or "—" | 65.42 or "—" |
-| **R²** (TSB/AUC) | Goodness of fit | 3 decimal places | 0.997 |
-| **SNR** (Derivative) | Signal-to-noise ratio | 1 decimal place | 8.5 |
-| **Method** | Analysis method used | Uppercase acronym | TSB, AUC, FD |
-| **Status** | Quality indicator | Emoji | ✅, ⚠️, ❌ |
+**Filename**: `QuantDSF_Report_YYYYMMDD_HHMMSS.pdf`
+(e.g., `QuantDSF_Report_20260110_143052.pdf`)
 
-#### **Status Indicators**
+**Report Structure**:
 
-| Status | Meaning | Criteria |
-|--------|---------|----------|
-| ✅ | High quality | R² ≥ 0.90 (TSB/AUC) or SNR ≥ 3.0 (FD) |
-| ⚠️ | Low quality | R² < 0.90 (TSB/AUC) or SNR < 3.0 (FD) |
-| ❌ | Failed | Analysis failed or Tm not found |
+#### **1. Title Page**
+- **Report Metadata**: Generation timestamp, Analysis Method (AUC/TSB/FD), Fluorescence Channel.
+- **QC Note**: Overview of quality control status.
 
-**Hover Tooltips**:
-- ✅: No additional info
-- ⚠️: "Low R²: 0.856 (threshold: 0.90)" or "Low SNR: 2.3 (threshold: 3.0)"
-- ❌: "Analysis failed or Tm not found"
+#### **2. Basic Analysis Results**
+- **Summary Table**:
+  - Sample Name, Concentration
+  - Tm (°C), R², Method
+  - QC Status (with color coding: ✅ Pass, ⚠️ Warning, ❌ Fail)
+- **Visualizations**:
+  - **Melting Curves**: Normalized fluorescence vs. Temperature.
+  - **Tm Distribution**: Histogram and box plot of Tm values.
 
-#### **Sorting**
-Default sort order:
-1. By concentration (low to high)
-2. Samples without concentration at the end
-3. Within same concentration: alphabetical by sample name
+#### **3. Dose-Response Analysis**
+(Included if Dose-Response analysis was run)
+- **EC50 Results Table**: EC50 value, 95% CI, Hill Slope, Fit R².
+- **Visualizations**:
+  - **Dose-Response Curve**: EC50 fitting across temperatures.
+- **SFQ/SFE Analysis** (if applicable):
+  - Static Fluorescence Quenching/Enhancement parameters.
+  - Mode detection (Quenching vs. Enhancement).
+  - AIC comparison metrics.
 
----
+#### **4. Thermodynamic Analysis**
+(Included if Thermodynamic analysis was run)
+- **Van't Hoff Parameters Table**:
+  - ΔH (Enthalpy), ΔS (Entropy).
+  - Extrapolated KD at 298K (25°C) and 310K (37°C).
+- **Visualizations**:
+  - **Van't Hoff Plot**: ln(KD) vs. 1/T.
+  - **Overlay Analysis**: Fitted curves overlaid on experimental data.
+  - **Isothermal Panels**: Dose-response fits at specific temperature slices.
 
-### 2.2 Interactive Plots
-
-#### **Plot 1: Melting Curves**
-- **X-axis**: Temperature (°C)
-- **Y-axis**: Normalized Fluorescence (0 to 1)
-- **Traces**: One per sample (color-coded)
-- **Features**:
-  - Hover: Shows (T, F, Sample name)
-  - Legend: Clickable to show/hide traces
-  - Zoom/pan enabled
-
-#### **Plot 2: Tm Distribution**
-- **Type**: Histogram + box plot overlay
-- **X-axis**: Tm (°C)
-- **Y-axis**: Count
-- **Features**:
-  - Shows distribution of Tm values
-  - Box plot shows median, quartiles, outliers
-
-#### **Plot 3: First Derivative Curves** (FD method only)
-- **X-axis**: Temperature (°C)
-- **Y-axis**: dF/dT (first derivative)
-- **Traces**: One per sample
-- **Markers**: Peak position = Tm
-- **Visibility**: Only shown when First Derivative method is selected
-
----
-
-### 2.3 Excel Export
-
-#### **File Format**
-- **Format**: `.xlsx` (Excel 2007+)
-- **Engine**: openpyxl
-- **Filename**: `QuantDSF_Results_<timestamp>.xlsx`
-
-#### **Sheet 1: Tm Results**
-
-| Column | Description | Type | Example |
-|--------|-------------|------|---------|
-| Sample | Sample name | String | "BSA" |
-| Concentration (M) | Ligand concentration | Float or empty | 1.0e-5 |
-| Tm (°C) | Melting temperature | Float or empty | 65.42 |
-| R² / SNR | Fit quality | Float | 0.997 |
-| Method | Analysis method | String | "boltzmann" |
-| Status | Quality flag | String | "✅" |
-| Source File | Original data file | String | "BSA_10uM_processed.csv" |
-
-#### **Sheet 2: Van't Hoff** (if applicable)
-Only included when thermodynamic analysis is performed.
-
-| Parameter | Value |
-|-----------|-------|
-| R² | 0.995 |
-| n_points | 8 |
-| ΔH (J/mol) | -250000 |
-| ΔS (J/mol/K) | -840 |
-| KD at 298K (M) | 1.2e-6 |
-| KD at 310K (M) | 8.3e-7 |
-| Reliability 298K | HIGH |
-| Reliability 310K | MEDIUM |
+#### **5. Appendix: Quality Control Details**
+Detailed breakdown of QC metrics for verification:
+- **A. Basic Analysis QC**: Summary statistics (Pass/Fail rates) and per-sample QC scores.
+- **B. Dose-Response QC**: Detailed flags and messages for EC50 fitting.
+- **C. Thermodynamics QC**: Reliability assessment for thermodynamic parameters.
 
 ---
 
