@@ -123,6 +123,39 @@
   - 位置: `app/components/sidebar.py:119-131`
 
 ### Fixed
+- **[PDF Export] QC Status Display Issue**: 修复PDF报告中QC状态显示为黑色方块的问题 (2026-01-23)
+  - **问题**: PDF中emoji字符(✅/⚠️/❌)无法被ReportLab的默认Helvetica字体渲染，显示为黑色方块(■)
+  - **修复** ([core/io/exporters/pdf_report_exporter.py](core/io/exporters/pdf_report_exporter.py#L131-L152)):
+    - 添加 `_convert_emoji_to_text()` 函数将emoji转换为ASCII文本
+    - ✅ → `PASS`, ⚠️ → `WARN`, ❌ → `FAIL`
+    - 更新 `_create_qc_table()` 自动转换所有表格中的emoji
+    - 更新Summary Statistics、Dose-Response QC和Thermodynamics QC表格
+  - **效果**: PDF中QC状态现在显示为可读文本，并保留颜色背景(绿/黄/红)区分状态
+
+- **[PDF Export] Loading Indicator**: 添加PDF导出过程的加载状态提示 (2026-01-23)
+  - **问题**: PDF生成需要数秒时间，期间页面无响应，仅标签页显示"updating"
+  - **修复** ([app/layouts/main_layout.py](app/layouts/main_layout.py#L135-L163), [app/callbacks/export_callbacks.py](app/callbacks/export_callbacks.py)):
+    - 添加全屏 `dcc.Loading` overlay组件
+    - 不透明灰色背景(`rgba(240, 240, 240, 0.95)`)覆盖整个页面
+    - 显示蓝色spinner和专业提示消息
+    - 主标题: "📄 Generating PDF Report" (深灰色/黑色，1.6rem)
+    - 副标题: "Please wait while we compile your results..." (中灰色，1rem)
+  - **效果**: 用户清楚知道系统正在工作，不会进行其他操作
+
+- **[Dose-Response] Concentration Sorting Issue**: 修复Dose-Response页面数据选择表格浓度排序错误 (2026-01-23)
+  - **问题**: 表格按字符串排序浓度，导致"12.20"排在"1560.00"前面（字符串排序）
+  - **根本原因**: Basic Analysis和Thermodynamic Analysis页面都已实现数值排序，但Dose-Response页面缺失此逻辑
+  - **修复** ([app/callbacks/dose_response_callbacks.py](app/callbacks/dose_response_callbacks.py#L435-L467)):
+    - 在 `populate_dr_table()` 中添加浓度数值排序逻辑
+    - 按浓度从低到高排序，无浓度样本排在最后
+    - 在每行添加 `_original_index` 字段保持索引映射
+    - 更新EC50和SFQ分析回调使用原始索引访问数据
+  - **修复位置**:
+    - 表格填充: [app/callbacks/dose_response_callbacks.py:435-467](app/callbacks/dose_response_callbacks.py#L435-L467)
+    - EC50数据提取: [app/callbacks/dose_response_callbacks.py:541-554](app/callbacks/dose_response_callbacks.py#L541-L554)
+    - SFQ数据提取: [app/callbacks/dose_response_callbacks.py:791-804](app/callbacks/dose_response_callbacks.py#L791-L804)
+  - **效果**: 表格现在正确按浓度数值从低到高排序，与其他标签页一致
+
 - **[UI Bug] Result Persistence**: 修复切换标签页后计算结果丢失的问题
   - 范围：Thermodynamic Analysis 和 Dose-Response Analysis
   - 修复：利用 `dcc.Store` 持久化存储结果，并在标签页重新渲染时从存储恢复UI状态，避免重新计算或丢失数据

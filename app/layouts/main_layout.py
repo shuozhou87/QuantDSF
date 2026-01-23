@@ -132,6 +132,38 @@ def create_main_layout() -> dbc.Container:
         # 下载组件
         dcc.Download(id='download-export-package'),
 
+        # Export loading overlay (全屏加载提示)
+        dcc.Loading(
+            id="loading-export",
+            type="default",
+            fullscreen=True,
+            children=html.Div(id='export-loading-trigger', style={'display': 'none'}),
+            overlay_style={
+                "visibility": "visible",
+                "backgroundColor": "rgba(240, 240, 240, 0.95)",  # 更不透明的灰色背景
+                "zIndex": "9999"
+            },
+            custom_spinner=html.Div([
+                dbc.Spinner(color="primary", size="lg", spinner_style={"width": "4rem", "height": "4rem"}),
+                html.Div([
+                    html.Div("📄 Generating PDF Report",
+                            style={
+                                "fontSize": "1.6rem",
+                                "fontWeight": "600",
+                                "color": "#2c3e50",  # 深灰/黑色
+                                "marginTop": "1.5rem",
+                                "marginBottom": "0.5rem"
+                            }),
+                    html.Div("Please wait while we compile your results...",
+                            style={
+                                "fontSize": "1rem",
+                                "color": "#7f8c8d",  # 中灰色
+                                "fontWeight": "normal"
+                            })
+                ])
+            ], className="text-center", style={"paddingTop": "20vh"})
+        ),
+
         # 导航栏
         create_navbar(),
         

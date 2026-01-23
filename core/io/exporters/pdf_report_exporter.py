@@ -128,6 +128,30 @@ def _create_table(data: List[List[str]], col_widths: Optional[List[float]] = Non
     return t
 
 
+def _convert_emoji_to_text(text: str) -> str:
+    """
+    Convert emoji QC symbols to PDF-safe text.
+
+    ReportLab's default fonts don't support emoji characters, so we replace them
+    with ASCII text that will render properly in PDFs.
+
+    Args:
+        text: Text potentially containing emoji symbols
+
+    Returns:
+        Text with emojis replaced by ASCII alternatives
+    """
+    if not isinstance(text, str):
+        return text
+
+    # Replace emoji with PDF-safe alternatives
+    text = text.replace('✅', 'PASS')
+    text = text.replace('⚠️', 'WARN')
+    text = text.replace('❌', 'FAIL')
+
+    return text
+
+
 def _create_qc_table(data: List[List[str]], qc_col_idx: int = -1) -> Table:
     """
     Create a QC-colored table with conditional formatting.
@@ -139,18 +163,23 @@ def _create_qc_table(data: List[List[str]], qc_col_idx: int = -1) -> Table:
     Returns:
         Styled Table with QC color coding
     """
-    t = _create_table(data, header_row=True)
+    # Convert emoji to text for all cells
+    data_clean = []
+    for row in data:
+        data_clean.append([_convert_emoji_to_text(cell) for cell in row])
+
+    t = _create_table(data_clean, header_row=True)
 
     # Add QC-based row coloring
     styles = []
-    for i, row in enumerate(data[1:], start=1):  # Skip header
+    for i, row in enumerate(data_clean[1:], start=1):  # Skip header
         if qc_col_idx >= 0 and qc_col_idx < len(row):
             status = row[qc_col_idx]
-            if '✅' in status:
+            if 'PASS' in status:
                 bg_color = QC_COLORS['pass']
-            elif '⚠️' in status:
+            elif 'WARN' in status:
                 bg_color = QC_COLORS['warning']
-            elif '❌' in status:
+            elif 'FAIL' in status:
                 bg_color = QC_COLORS['fail']
             else:
                 continue
@@ -419,9 +448,9 @@ def _generate_qc_appendix(basic_data: Dict, dose_response_data: Dict,
         summary_text = f"""
         <b>Summary Statistics:</b><br/>
         Total Samples: {total_samples}<br/>
-        Passed (✅): {passed} ({pass_rate:.1f}%)<br/>
-        Warned (⚠️): {warned}<br/>
-        Failed (❌): {failed}
+        Passed: {passed} ({pass_rate:.1f}%)<br/>
+        Warned: {warned}<br/>
+        Failed: {failed}
         """
         story.append(Paragraph(summary_text, styles['Normal']))
         story.append(Spacer(1, 0.5*cm))
@@ -452,7 +481,7 @@ def _generate_qc_appendix(basic_data: Dict, dose_response_data: Dict,
 
         dr_qc_data = [
             ['QC Metric', 'Value'],
-            ['QC Flag', dose_response_data.get('qc_flag', 'N/A')],
+            ['QC Flag', _convert_emoji_to_text(dose_response_data.get('qc_flag', 'N/A'))],
             ['QC Score', f"{dose_response_data.get('qc_score', 0):.1f}" if dose_response_data.get('qc_score') is not None else 'N/A'],
             ['QC Message', dose_response_data.get('qc_message', 'N/A')],
         ]
@@ -487,7 +516,7 @@ def _generate_qc_appendix(basic_data: Dict, dose_response_data: Dict,
 
         thermo_qc_data = [
             ['QC Metric', 'Value'],
-            ['QC Flag', thermodynamics_data.get('qc_flag', 'N/A')],
+            ['QC Flag', _convert_emoji_to_text(thermodynamics_data.get('qc_flag', 'N/A'))],
             ['QC Score', f"{thermodynamics_data.get('qc_score', 0):.1f}" if thermodynamics_data.get('qc_score') is not None else 'N/A'],
             ['QC Message', thermodynamics_data.get('qc_message', 'N/A')],
         ]

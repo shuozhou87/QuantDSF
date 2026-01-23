@@ -431,10 +431,18 @@ def register_dose_response_callbacks(app: Dash) -> None:
             return [], [], "No analysis data. Run Tm analysis first."
 
         results = results_data['results']
+
+        # 按浓度排序（低到高），无浓度的排在最后
+        # Sort by concentration (low to high), put samples without concentration at the end
+        sorted_results = sorted(
+            enumerate(results),  # Keep track of original indices
+            key=lambda x: (x[1].get('concentration') is None, x[1].get('concentration') or float('inf'))
+        )
+
         rows = []
         auto_selected = []
 
-        for idx, r in enumerate(results):
+        for new_idx, (original_idx, r) in enumerate(sorted_results):
             tm = r.get('tm')
             r2 = r.get('r_squared')
             conc = r.get('concentration')
@@ -446,12 +454,13 @@ def register_dose_response_callbacks(app: Dash) -> None:
                 "tm": f"{tm:.1f}" if tm is not None else "N/A",
                 "r2": f"{r2:.3f}" if r2 is not None else "N/A",
                 "method": r.get('method', '').upper(),
-                "quality": r.get('quality_flag', '')
+                "quality": r.get('quality_flag', ''),
+                "_original_index": original_idx  # Store original index for selection mapping
             })
 
             # Auto-select high quality fits (R² ≥ 0.85) with valid concentration
             if r2 is not None and r2 >= 0.85 and conc is not None and np.isfinite(conc) and conc > 0:
-                auto_selected.append(idx)
+                auto_selected.append(new_idx)  # Use new sorted index
 
         hint = f"{len(rows)} total samples; auto-selected {len(auto_selected)} high-quality points (R² ≥ 0.85). Adjust selection as needed."
 
@@ -532,22 +541,26 @@ def register_dose_response_callbacks(app: Dash) -> None:
             )
 
         # Extract selected data
-        # selected_rows contains the row indices directly corresponding to the results array
+        # selected_rows contains the sorted table row indices, need to map to original indices
         results = results_data['results']
         concentrations = []
         tm_values = []
         names = []
 
-        for row_idx in selected_rows:
-            if row_idx < len(results):
-                r = results[row_idx]
-                conc = r.get('concentration')
-                tm = r.get('tm')
+        for sorted_row_idx in selected_rows:
+            if sorted_row_idx < len(table_data):
+                # Get the original index from the sorted table data
+                original_idx = table_data[sorted_row_idx].get('_original_index', sorted_row_idx)
 
-                if conc is not None and tm is not None and np.isfinite(conc) and np.isfinite(tm) and conc > 0:
-                    concentrations.append(conc)
-                    tm_values.append(tm)
-                    names.append(r.get('name', f'Sample {row_idx}'))
+                if original_idx < len(results):
+                    r = results[original_idx]
+                    conc = r.get('concentration')
+                    tm = r.get('tm')
+
+                    if conc is not None and tm is not None and np.isfinite(conc) and np.isfinite(tm) and conc > 0:
+                        concentrations.append(conc)
+                        tm_values.append(tm)
+                        names.append(r.get('name', f'Sample {original_idx}'))
 
         if len(concentrations) < 3:
             fig.add_annotation(
@@ -788,16 +801,20 @@ def register_dose_response_callbacks(app: Dash) -> None:
         if channel and 'ratio' not in channel.lower():
             # Build sample list for SFQ analysis using ONLY selected rows (same as EC50)
             sfq_samples = []
-            for row_idx in selected_rows:
-                if row_idx < len(results):
-                    r = results[row_idx]
-                    if r.get('concentration') and r.get('T') and r.get('F'):
-                        sfq_samples.append({
-                            'concentration': r['concentration'],
-                            'T': r['T'],
-                            'F': r['F'],
-                            'name': r.get('name', '')
-                        })
+            for sorted_row_idx in selected_rows:
+                if sorted_row_idx < len(table_data):
+                    # Get the original index from the sorted table data
+                    original_idx = table_data[sorted_row_idx].get('_original_index', sorted_row_idx)
+
+                    if original_idx < len(results):
+                        r = results[original_idx]
+                        if r.get('concentration') and r.get('T') and r.get('F'):
+                            sfq_samples.append({
+                                'concentration': r['concentration'],
+                                'T': r['T'],
+                                'F': r['F'],
+                                'name': r.get('name', '')
+                            })
 
             print(f"[SFQ] Found {len(sfq_samples)} samples with T/F data")
 

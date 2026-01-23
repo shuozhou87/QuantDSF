@@ -18,7 +18,8 @@ def register_export_callbacks(app: Dash) -> None:
     """注册导出相关回调"""
 
     @app.callback(
-        Output('download-export-package', 'data'),
+        [Output('download-export-package', 'data'),
+         Output('export-loading-trigger', 'children')],
         Input('export-btn', 'n_clicks'),
         State('analysis-results-store', 'data'),
         State('dose-response-store', 'data'),
@@ -66,7 +67,7 @@ def register_export_callbacks(app: Dash) -> None:
 
         if not n_clicks:
             print("[EXPORT] No clicks yet, returning None")
-            return None
+            return None, ""
 
         print(f"[EXPORT] Starting PDF export process...")
 
@@ -152,13 +153,15 @@ def register_export_callbacks(app: Dash) -> None:
                 figures=figures
             )
             print(f"[EXPORT] PDF generated: {pdf_filename} ({len(pdf_bytes)} bytes)")
-            return dcc.send_bytes(pdf_bytes, pdf_filename)
+            # Return download and clear loading trigger
+            return dcc.send_bytes(pdf_bytes, pdf_filename), ""
 
         except Exception as e:
             # Log error (in production, use proper logging)
             print(f"[EXPORT] Error: {str(e)}")
             import traceback
             traceback.print_exc()
-            return None
+            # Return None for download and clear loading trigger
+            return None, ""
 
 
