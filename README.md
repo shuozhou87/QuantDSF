@@ -23,10 +23,16 @@ QuantDSF v2 is a comprehensive desktop application for protein thermal stability
 - **Dose-Response Analysis**
   - Direct ligand titration analysis
   - EC₅₀ calculation from isothermal data
-  - **Static Fluorescence Quenching/Enhancement (SFQ/SFE)**
+  - **Static Fluorescence Quenching/Enhancement (SFQ/SFE)** v2.2
     - Detects systematic changes in native-state fluorescence with ligand concentration
     - Distinguishes between Quenching and Enhancement modes
-    - Validates binding using Linear vs. 4PL model comparison (AIC)
+    - **Three-tier decision framework**:
+      1. Signal Change assessment (≥20% threshold)
+      2. Model comparison using ΔAIC (piecewise linear vs 4PL)
+      3. Saturation Index (SI) for plateau quality validation
+    - **Advanced non-specific binding model**: Piecewise linear (F ~ log C) with automatic breakpoint detection
+    - **Robust false positive rejection**: Empirically validated thresholds (ΔAIC: 10/15, SI: 0.5/1.0)
+    - Color-coded status: Detected (green) | Detected (caution) (yellow) | Not detected (gray/yellow)
 
 - **Quality Control**
   - Signal-to-Noise Ratio (SNR)

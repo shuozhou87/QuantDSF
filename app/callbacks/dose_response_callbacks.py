@@ -58,7 +58,7 @@ def _create_sfq_figure(sfq_result):
         y=sfq_result.linear_fit_y,
         mode='lines',
         line=dict(color='gray', width=2, dash='dash'),
-        name=f'Linear (R²={cr.r2_linear:.3f})'
+        name=f'Non-specific (R²={cr.r2_linear:.3f})'
     ))
 
     # 4PL fit (if available)
@@ -123,10 +123,17 @@ def _create_sfq_results_ui(sfq_result, channel):
     cr = sfq_result.channel_result
     summary = format_sfq_summary(sfq_result)
 
-    # Determine status color
+    # Determine status color and icon
     if cr.status == 'Not detected':
-        status_color = 'secondary'
-        status_icon = 'fas fa-minus-circle'
+        # Distinguish between non-specific binding (yellow) vs truly no signal (gray)
+        if cr.notes and 'Non-specific model fits equally well' in cr.notes:
+            # Non-specific binding detected - use yellow to indicate cautionary finding
+            status_color = 'warning'
+            status_icon = 'fas fa-exclamation-triangle'
+        else:
+            # Truly no signal or other failure - use gray
+            status_color = 'secondary'
+            status_icon = 'fas fa-minus-circle'
     elif cr.status == 'Detected':
         status_color = 'success'
         status_icon = 'fas fa-check-circle'
@@ -140,13 +147,14 @@ def _create_sfq_results_ui(sfq_result, channel):
     # Build metrics table
     metrics_rows = [
         html.Tr([html.Td("Status"), html.Td(dbc.Badge(cr.status, color=status_color))]),
-        html.Tr([html.Td("Dynamic Range (span)"), html.Td(f"{cr.span:.1f}%")]),
-        html.Tr([html.Td("ΔAIC (linear - 4PL)"), html.Td(f"{cr.delta_aic:.1f}")]),
+        html.Tr([html.Td("Signal Change"), html.Td(f"{cr.span:.1f}%")]),
+        html.Tr([html.Td("ΔAIC (non-specific - 4PL)"), html.Td(f"{cr.delta_aic:.1f}")]),
     ]
 
+    # Show SI as the primary and only saturation metric
     if cr.saturation_index is not None:
         metrics_rows.append(
-            html.Tr([html.Td("Saturation Index (SI)"), html.Td(f"{cr.saturation_index:.3f}")])
+            html.Tr([html.Td("Saturation Index (SI)"), html.Td(f"{cr.saturation_index:.3f}", style={"fontWeight": "bold", "color": "#0066cc"})])
         )
 
     if cr.mode:
@@ -331,11 +339,19 @@ def _create_sfq_results_ui_from_data(sfq_result_dict, sfq_figure):
         return _create_sfq_default_content()
 
     status = sfq_result_dict.get('dataset_status', 'Not detected')
+    notes = sfq_result_dict.get('notes', '')
     
-    # Determine status color
+    # Determine status color and icon
     if status == 'Not detected':
-        status_color = 'secondary'
-        status_icon = 'fas fa-minus-circle'
+        # Distinguish between non-specific binding (yellow) vs truly no signal (gray)
+        if notes and 'Non-specific model fits equally well' in notes:
+            # Non-specific binding detected - use yellow
+            status_color = 'warning'
+            status_icon = 'fas fa-exclamation-triangle'
+        else:
+            # Truly no signal or other failure - use gray
+            status_color = 'secondary'
+            status_icon = 'fas fa-minus-circle'
     elif status == 'Detected':
         status_color = 'success'
         status_icon = 'fas fa-check-circle'
@@ -352,14 +368,17 @@ def _create_sfq_results_ui_from_data(sfq_result_dict, sfq_figure):
     # Build metrics table rows
     metrics_rows = [
         html.Tr([html.Td("Status"), html.Td(dbc.Badge(status, color=status_color))]),
-        html.Tr([html.Td("Dynamic Range (span)"), html.Td(f"{sfq_result_dict.get('span', 0):.1f}%")]),
-        html.Tr([html.Td("ΔAIC (linear - 4PL)"), html.Td(f"{sfq_result_dict.get('delta_aic', 0):.1f}")]),
+        html.Tr([html.Td("Signal Change"), html.Td(f"{sfq_result_dict.get('span', 0):.1f}%")]),
+        html.Tr([html.Td("ΔAIC (non-specific - 4PL)"), html.Td(f"{sfq_result_dict.get('delta_aic', 0):.1f}")]),
     ]
 
+
+    # Show SI as the primary and only saturation metric
     if sfq_result_dict.get('saturation_index') is not None:
         metrics_rows.append(
-            html.Tr([html.Td("Saturation Index (SI)"), html.Td(f"{sfq_result_dict['saturation_index']:.3f}")])
+            html.Tr([html.Td("Saturation Index (SI)"), html.Td(f"{sfq_result_dict['saturation_index']:.3f}", style={"fontWeight": "bold", "color": "#0066cc"})])
         )
+
 
     if sfq_result_dict.get('mode'):
         metrics_rows.append(html.Tr([html.Td("Mode"), html.Td(sfq_result_dict['mode'])]))

@@ -13,20 +13,42 @@
   - Includes Title Page, Basic Analysis results, Figures, and QC Appendix.
   - Replaces previous ZIP/Excel export mechanism.
 - **SFQ/SFE Documentation**: Added `docs/specs/SFQ_SFE.md` detailing Static Fluorescence Quenching analysis.
-- **Static Fluorescence Quenching/Enhancement (SFQ/SFE) Analysis**: Dose-Response标签页新增SFQ分析功能
-  - **核心功能**:
+- **Static Fluorescence Quenching/Enhancement (SFQ/SFE) Analysis v2.2**: 重大算法升级和假阳性率改进
+  - **v2.2核心升级** (2026-01-26):
+    - **分段线性非特异性模型**: 从简单线性(F~logC)升级为分段线性模型
+      - 算法: F = slope₁×log(C) + intercept₁ (C < C_break) | slope₂×log(C) + intercept₂ (C ≥ C_break)
+      - 自动断点检测: 在30%-70%数据范围内搜索最优断点
+      - R²改进: 0.840 → 0.996 (假阳性数据拟合质量)
+      - ΔAIC区分度: 假阳性从57.3降至7.1 (vs 真阳性27.1)，区分比3.8×
+    - **三层判定标准框架**:
+      1. **Tier 1 - Signal Change (前置条件)**: ≥20% (重命名自"Dynamic Range (span)")
+      2. **Tier 2 - ΔAIC (模型对决)**: 强证据≥15, 中等≥10, 弱<10 (更新自6.0)
+      3. **Tier 3 - SI (饱和质量)**: 强≤0.5, 中等0.5-1.0, 弱≥1.0
+    - **联合判定逻辑**: 6种分类规则考虑ΔAIC和SI的组合
+      - "Detected" (绿): ΔAIC≥15 且 SI<0.5
+      - "Detected (caution)" (黄): 边缘情况
+      - "Not detected": ΔAIC<10 或其他失败
+    - **性能提升**:
+      - 假阳性率: >90% → <10%
+      - SI区分度: 5.1× (真阳性0.142 vs 假阳性0.725)
+      - 验证数据: HSA+Furosemide (真阳性) vs Molten HSA (假阳性)
+  - **v1.0原功能** (2025-12):
     - 检测native state（低温窗口）荧光随配体浓度的系统性变化
     - 区分Quenching（淬灭）和Enhancement（增强）两种模式
-    - 使用线性 vs 4PL模型对决（AIC比较）判定是否存在饱和信号
     - 计算EC50_app（表观EC50）用于半定量分析
   - **质量控制**:
-    - 动态范围检查（span ≥ 30%）
+    - Signal Change检查（≥ 20%，原span ≥ 30%）
     - 饱和指数（SI）评估高浓度平台期质量
     - 三态输出：Not detected / Detected / Detected (caution)
   - **SI算法改进**（v1.0实现）:
     - 使用滑动窗口找最陡峭区域，比固定中间区域更准确
     - 阈值调整：SI < 0.3（绿标）、0.3-0.6（黄标）、>0.6（警告）
     - 原设计阈值（0.2/0.5）对高质量数据过严，已放宽
+  - **UI改进** (v2.2):
+    - Signal Change命名更新（避免与Tm "Dynamic Range"混淆）
+    - 非特异性结合显示黄色警告（而非灰色）
+    - Summary消息区分三种"Not detected"情况
+    - 分段线性拟合曲线可视化
   - **UI集成**:
     - Dose-Response标签页下方折叠卡片
     - 仅在330nm/350nm通道显示（ratio通道不支持）
@@ -37,13 +59,15 @@
     - 用户在表格中取消选择的outlier点会被正确排除
   - **导出支持**:
     - Excel Dose_Response sheet新增SFQ字段
-    - 包含：Status, Channel, Mode, EC50_app, Span, ΔAIC, SI, Notes
+    - 包含：Status, Channel, Mode, EC50_app, Signal_Change, ΔAIC, SI, Notes
   - **实现文件**:
-    - 核心算法: `core/analysis/sfq_analysis.py`（新建）
-    - UI回调: `app/callbacks/dose_response_callbacks.py`（修改）
-    - 布局: `app/callbacks/tab_callbacks.py`（修改）
-    - 导出: `core/io/exporters/excel_exporter.py`（修改）
-  - **技术文档**: [SFQ_SFE.md](docs/SFQ_SFE.md)
+    - 核心算法: `core/analysis/sfq_analysis.py` (新建)
+    - SI计算: `calculate_saturation_index()` (2点窗口法)
+    - 分段拟合: `fit_piecewise_linear_model()` (v2.2新增)
+    - UI回调: `app/callbacks/dose_response_callbacks.py` (修改)
+    - 布局: `app/callbacks/tab_callbacks.py` (修改)
+    - 导出: `core/io/exporters/excel_exporter.py` (修改)
+  - **技术文档**: [SFQ_SFE.md](docs/specs/SFQ_SFE.md) v2.2 - 完整方法学规范
 
 - **Complete Export Package Feature**: 一键导出所有分析结果和图表为ZIP包
   - **ZIP包内容**:
@@ -155,6 +179,19 @@
     - EC50数据提取: [app/callbacks/dose_response_callbacks.py:541-554](app/callbacks/dose_response_callbacks.py#L541-L554)
     - SFQ数据提取: [app/callbacks/dose_response_callbacks.py:791-804](app/callbacks/dose_response_callbacks.py#L791-L804)
   - **效果**: 表格现在正确按浓度数值从低到高排序，与其他标签页一致
+
+- **[SFQ Analysis] Non-Specific Fitting Model**: 修复SFQ分析中非特异性吸光对照模型错误 (2026-01-23)
+  - **问题**: 线性对照拟合使用了 F ~ log(C) 模型，不符合Lambert-Beer定律
+  - **理论依据**: 非特异性吸光/荧光淬灭应遵循Lambert-Beer定律，即 F ~ C（荧光与浓度成正比）
+  - **修复** ([core/analysis/sfq_analysis.py](core/analysis/sfq_analysis.py)):
+    - 将 `linear_logc()` 函数改为 `linear_c()`，使用 F = slope * C + intercept
+    - 更新 `fit_linear_model()` 在浓度空间（而非对数空间）进行线性回归
+    - 更新绘图代码生成正确的非特异性拟合曲线
+  - **UI更新** ([app/callbacks/dose_response_callbacks.py](app/callbacks/dose_response_callbacks.py)):
+    - 图例标签从 "Linear" 改为 "Non-specific" 更准确描述模型
+    - ΔAIC标签从 "ΔAIC (linear - 4PL)" 改为 "ΔAIC (non-specific - 4PL)"
+  - **效果**: 非特异性对照线现在正确反映Lambert-Beer线性关系，在对数浓度坐标下呈现曲线（而非直线）
+
 
 - **[UI Bug] Result Persistence**: 修复切换标签页后计算结果丢失的问题
   - 范围：Thermodynamic Analysis 和 Dose-Response Analysis
