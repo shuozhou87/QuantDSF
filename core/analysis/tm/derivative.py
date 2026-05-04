@@ -143,7 +143,8 @@ def compute_derivative(
 def find_derivative_peaks(
     T: np.ndarray,
     derivative: np.ndarray,
-    method: str = "find_peaks"
+    method: str = "find_peaks",
+    temp_range: tuple = None
 ) -> List[Tuple[float, float]]:
     """
     检测导数峰值
@@ -152,22 +153,29 @@ def find_derivative_peaks(
         T: 温度数组
         derivative: 导数数组
         method: 检测方法 (find_peaks/polynomial_fit/gaussian_deconvolution)
+        temp_range: optional (min, max) for deconvolution fitting region
 
     Returns:
         List of (peak_temperature, peak_height) tuples
     """
-    if method == "find_peaks":
-        # 策略: 找到|dF/dT|绝对值最大的位置
-        # 对于nanoDSF，熔解转变点是导数绝对值最大的地方（无论正负）
+    if method == "gaussian_deconvolution":
+        # Dual-peak Gaussian deconvolution
+        from .gaussian_deconv import deconvolute_dual_peaks
+        deconv = deconvolute_dual_peaks(T, derivative, temp_range=temp_range)
+        if deconv['success'] and len(deconv['peaks']) >= 2:
+            # Return both peaks as (Tm, peak_height) tuples, sorted by temperature
+            return [(p['tm'], p['amplitude']) for p in deconv['peaks']]
+        # Fallback: if deconvolution fails, fall through to single-peak find_peaks
+        pass
 
-        # 找到绝对值最大的位置（无论正负）
-        # 对于nanoDSF，熔解转变点是导数绝对值最大的地方
+    if method == "find_peaks" or method == "gaussian_deconvolution":
+        # Single-peak: find |dF/dT| absolute maximum
         abs_derivative = np.abs(derivative)
         peak_idx = np.argmax(abs_derivative)
         Tm_simple = T[peak_idx]
         peak_height = derivative[peak_idx]
 
-        # 可选: 在峰值附近进行抛物线拟合以亚采样精度
+        # Parabolic refinement for sub-sample precision
         half_width = 3
         start = max(0, peak_idx - half_width)
         end = min(len(T), peak_idx + half_width + 1)
@@ -177,23 +185,17 @@ def find_derivative_peaks(
             deriv_local = derivative[start:end]
 
             try:
-                # 二次多项式拟合: y = ax^2 + bx + c
                 coeffs = np.polyfit(T_local, deriv_local, 2)
-
-                # 极值点: x = -b / (2a)
-                if coeffs[0] != 0:  # 确保是抛物线
+                if coeffs[0] != 0:
                     Tm_refined = -coeffs[1] / (2 * coeffs[0])
-
-                    # 确保精细化的Tm在合理范围内
                     if T_local[0] <= Tm_refined <= T_local[-1]:
                         peak_height_refined = np.polyval(coeffs, Tm_refined)
-                        print(f"[DEBUG] Refined Tm={Tm_refined:.2f}°C (vs simple {Tm_simple:.1f}°C)")
                         return [(Tm_refined, peak_height_refined)]
             except:
                 pass
 
         return [(Tm_simple, peak_height)]
-    
+
     elif method == "polynomial_fit":
         # 在最小值附近进行多项式拟合精细化
         peak_idx = np.argmin(derivative)
@@ -264,34 +266,52 @@ def calculate_tm_derivative(
                 quality_flag="❌",
                 warnings=["未检测到导数峰"]
             )
-        
-        # 取最显著的峰
-        Tm, peak_height = peaks[0]
-        
-        # Step 3: 质量评估
-        # 使用峰高和信噪比作为 R² 的代理指标
-        noise_level = np.std(derivative[:10])  # 前10个点估计噪声
+
+        # For Gaussian deconvolution, also run full deconvolution for metadata
+        additional_peaks = None
+        deconv_r2 = None
+        deconv_baseline = None
+
+        if config.derivative_peak_method == "gaussian_deconvolution" and len(peaks) >= 2:
+            from .gaussian_deconv import deconvolute_dual_peaks
+            deconv = deconvolute_dual_peaks(T_deriv, derivative)
+            if deconv['success']:
+                additional_peaks = deconv['peaks']  # list of dicts with tm, amplitude, width, area
+                deconv_r2 = deconv['fit_r_squared']
+                deconv_baseline = deconv['baseline']
+
+        # Primary Tm = most prominent peak (largest absolute amplitude)
+        primary_idx = 0
+        if len(peaks) > 1:
+            primary_idx = max(range(len(peaks)), key=lambda i: abs(peaks[i][1]))
+
+        Tm, peak_height = peaks[primary_idx]
+
+        # Step 3: Quality assessment
+        noise_level = np.std(derivative[:10])  # estimate noise from first 10 points
         snr = abs(peak_height) / noise_level if noise_level > 0 else 0
-        
-        # 将 SNR 转换为类似 R² 的 0-1 范围
-        r2_proxy = min(1.0, snr / 10.0)  # SNR >= 10 时视为优秀
-        
+
+        r2_proxy = min(1.0, snr / 10.0)
+
         if snr < 3:
             warnings.append(f"信噪比较低 (SNR={snr:.1f})")
             quality_flag = "⚠️"
-        
+
         if Tm < T.min() + 5 or Tm > T.max() - 5:
             warnings.append("Tm 接近温度范围边界")
             quality_flag = "⚠️"
-        
-        # 估计峰宽度
+
+        if len(peaks) >= 2:
+            warnings.append(f"Dual peaks detected: {peaks[0][0]:.1f}°C and {peaks[1][0]:.1f}°C")
+
+        # Estimate peak width
         half_max = peak_height / 2
         above_half = np.where(derivative < half_max)[0]
         if len(above_half) >= 2:
             peak_width = T[above_half[-1]] - T[above_half[0]]
         else:
             peak_width = None
-        
+
         return TmResult(
             tm=float(Tm),
             r_squared=float(r2_proxy),
@@ -300,7 +320,10 @@ def calculate_tm_derivative(
             peak_width=float(peak_width) if peak_width else None,
             snr=float(snr),
             quality_flag=quality_flag,
-            warnings=warnings
+            warnings=warnings,
+            additional_peaks=additional_peaks,
+            deconv_r_squared=deconv_r2,
+            deconv_baseline=deconv_baseline
         )
         
     except Exception as e:

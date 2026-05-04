@@ -13,4 +13,4 @@ echo ""
 source .venv/bin/activate
 
 # Start the application on port 9050
-python app_v2.py --port 9050 --host 127.0.0.1
+python3 app_v2.py --port 9050 --host 127.0.0.1

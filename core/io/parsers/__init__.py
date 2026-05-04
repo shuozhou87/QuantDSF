@@ -18,6 +18,39 @@ from .tycho import parse_tycho_nt6_csv, parse_tycho_nt6_excel, is_tycho_file
 from ...utils import parse_concentration
 
 
+# ============================================================================
+# Custom Exceptions for Better Error Handling
+# ============================================================================
+
+class FileParsingError(Exception):
+    """Base exception for file parsing errors"""
+    pass
+
+
+class InvalidZipFileError(FileParsingError):
+    """Raised when the uploaded file is not a valid ZIP archive"""
+    pass
+
+
+class NoValidDataError(FileParsingError):
+    """Raised when no valid nanoDSF data is found in the ZIP file"""
+    pass
+
+
+class UnsupportedFileTypeError(FileParsingError):
+    """Raised when files in an unsupported format are encountered"""
+    pass
+
+
+class DataParsingError(FileParsingError):
+    """Raised when data parsing fails for a specific file"""
+    pass
+
+
+# ============================================================================
+# Instrument Detection
+# ============================================================================
+
 def detect_instrument_type(file_content: Union[bytes, str], file_path: str) -> str:
     """
     检测仪器类型
@@ -109,30 +142,40 @@ def parse_zip_file(
             
             log_debug(f"找到 {len(relevant_files)} 个相关文件")
             
+            # Check if we found any relevant files at all
+            if not relevant_files:
+                error_msg = (
+                    f"No valid nanoDSF data files found in ZIP archive. "
+                    f"Found {len(all_files)} total files, but none matched the criteria for "
+                    f"channel '{channel}' (CSV/XLSX from Prometheus or Tycho instruments)."
+                )
+                log_debug(error_msg)
+                raise NoValidDataError(error_msg)
+
             for file_path in relevant_files:
                 try:
                     raw_content = z.read(file_path)
-                    
+
                     instrument_type = detect_instrument_type(raw_content, file_path)
                     log_debug(f"文件 {file_path}: 检测为 {instrument_type}")
-                    
+
                     if instrument_type in ['prometheus', 'tycho_nt6']:
                         parsed_result = parse_instrument_file(
                             raw_content, file_path, instrument_type, channel
                         )
-                        
+
                         if isinstance(parsed_result, tuple):
                             sample_data = [parsed_result]
                         else:
                             sample_data = parsed_result
-                        
+
                         for T, F, capillary_id in sample_data:
                             if len(T) != len(F) or len(T) < 10:
                                 log_debug(f"跳过 {capillary_id}: 数据不足")
                                 continue
-                            
+
                             concentration = parse_concentration(file_path)
-                            
+
                             capillaries.append({
                                 'id': capillary_id,
                                 'name': capillary_id,
@@ -142,19 +185,44 @@ def parse_zip_file(
                                 'source_file': file_path,
                                 'instrument_type': instrument_type
                             })
-                            
+
                             log_debug(f"加载毛细管 {capillary_id}: {len(T)} 个数据点")
-                
+
                 except Exception as e:
                     log_debug(f"处理文件 {file_path} 时出错: {str(e)}")
+                    # Don't fail the whole batch for one bad file
                     continue
-        
+
+        # Check if we successfully parsed any capillaries
+        if not capillaries:
+            error_msg = (
+                f"No valid sample data could be extracted from ZIP file. "
+                f"Processed {len(relevant_files)} files, but none contained valid nanoDSF data. "
+                f"Please ensure the ZIP contains CSV/XLSX files from Prometheus NT.48 or Tycho NT.6 instruments."
+            )
+            log_debug(error_msg)
+            raise NoValidDataError(error_msg)
+
         log_debug(f"成功提取 {len(capillaries)} 个毛细管")
         return capillaries
+
+    except zipfile.BadZipFile as e:
+        error_msg = (
+            f"Invalid ZIP file format. The uploaded file appears to be corrupted or is not a valid ZIP archive. "
+            f"Error: {str(e)}"
+        )
+        log_debug(error_msg)
+        raise InvalidZipFileError(error_msg) from e
+
+    except NoValidDataError:
+        # Re-raise our custom exception as-is
+        raise
         
     except Exception as e:
-        log_debug(f"读取 ZIP 文件时出错: {str(e)}")
-        raise ValueError(f"读取 ZIP 文件时出错: {str(e)}")
+        error_msg = f"Unexpected error while reading ZIP file: {str(e)}"
+        log_debug(error_msg)
+        raise DataParsingError(error_msg) from e
+
 
 
 def _find_relevant_files(
@@ -216,6 +284,13 @@ def _find_relevant_files(
 
 
 __all__ = [
+    # Exception classes
+    'FileParsingError',
+    'InvalidZipFileError',
+    'NoValidDataError',
+    'UnsupportedFileTypeError',
+    'DataParsingError',
+    # Functions
     'detect_instrument_type',
     'parse_instrument_file',
     'parse_zip_file',
@@ -225,4 +300,3 @@ __all__ = [
     'is_prometheus_file',
     'is_tycho_file',
 ]
-

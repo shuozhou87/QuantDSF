@@ -9,6 +9,8 @@ Sidebar Component
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
+from app.example_datasets import MANUSCRIPT_EXAMPLE_DATASETS, get_example_dataset_options
+
 
 def create_sidebar() -> dbc.Card:
     """创建侧边栏"""
@@ -77,21 +79,50 @@ def _create_file_upload_section() -> html.Div:
         html.Div(id='upload-status', className="mt-2 text-muted small"),
         html.Div(id='loaded-files-list', className="mt-2"),
         
-        # Test Data Button (for development/debugging)
+        html.Div([
+            html.Label("Example Dataset", className="fw-bold small mb-1"),
+            dcc.Dropdown(
+                id='example-dataset-selector',
+                options=get_example_dataset_options(),
+                value=MANUSCRIPT_EXAMPLE_DATASETS[0].id,
+                clearable=False,
+                searchable=True,
+                className="mb-2"
+            ),
+        ], className="mt-3"),
         dbc.Button(
-            [html.I(className="fas fa-flask me-1"), "Load Test Data"],
-            id='load-test-data-btn',
+            [html.I(className="fas fa-flask me-1"), "Load Example"],
+            id='load-example-data-btn',
             color="secondary",
             outline=True,
             size="sm",
-            className="w-100 mt-2"
+            className="w-100"
         ),
         dbc.Tooltip(
-            "Load RPA+SSDNA_13406_DOSE.zip for automated testing",
-            target="load-test-data-btn",
+            "Load the selected example dataset and recommended analysis settings",
+            target="load-example-data-btn",
             placement="bottom"
         ),
+        _create_error_alert(),
     ], className="mb-4")
+
+
+def _create_error_alert() -> dbc.Alert:
+    """错误提示组件 - 醒目地显示文件上传和分析错误"""
+    return dbc.Alert(
+        id='analysis-error-alert',
+        children="",  # Empty by default
+        is_open=False,
+        dismissable=True,
+        color='danger',
+        className='mb-3 mt-3',
+        style={
+            'fontSize': '14px',
+            'fontWeight': '500',
+            'border': '2px solid #dc3545',
+            'boxShadow': '0 4px 6px rgba(220, 53, 69, 0.2)'
+        }
+    )
 
 
 
@@ -269,6 +300,54 @@ def _create_advanced_settings() -> html.Div:
                 "Use with caution for exploratory analysis."
             ], className="text-muted small"),
         ]),
+
+        # Dual-Peak / Gaussian Deconvolution
+        html.Div([
+            html.Label("Multi-Peak Analysis", className="fw-bold small mb-2 mt-3"),
+            dbc.Checkbox(
+                id="dual-peak-checkbox",
+                label="Enable dual-peak Gaussian deconvolution",
+                value=False,
+                className="mb-2"
+            ),
+            html.Small([
+                "For multi-domain proteins (e.g., LAMP2) or multi-component systems (e.g., PROTAC). ",
+                "Splits the derivative curve into two Gaussian peaks and tracks each independently."
+            ], className="text-muted small"),
+
+            # Temperature range for deconvolution
+            html.Div([
+                html.Label("Fitting Region (°C)", className="small mt-2 mb-1"),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Input(
+                            id="deconv-temp-min",
+                            type="number",
+                            value=55,
+                            placeholder="Min",
+                            size="sm",
+                            style={"fontSize": "11px"}
+                        ),
+                    ], width=5),
+                    dbc.Col(html.Span("–", className="text-center d-block mt-1"), width=2),
+                    dbc.Col([
+                        dbc.Input(
+                            id="deconv-temp-max",
+                            type="number",
+                            value=80,
+                            placeholder="Max",
+                            size="sm",
+                            style={"fontSize": "11px"}
+                        ),
+                    ], width=5),
+                ], className="g-1"),
+                html.Small(
+                    "Restrict Gaussian fitting to the transition region. "
+                    "Adjust based on your derivative plot.",
+                    className="text-muted small"
+                ),
+            ], id="deconv-temp-range-container", style={"display": "none"}),
+        ]),
     ])
 
 
@@ -293,5 +372,3 @@ def _create_action_buttons() -> html.Div:
             className="w-100"
         ),
     ])
-
-

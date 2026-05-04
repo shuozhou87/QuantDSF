@@ -10,6 +10,9 @@ from dash import html
 import dash_bootstrap_components as dbc
 
 
+GITHUB_URL = "https://github.com/shuozhou87/QuantDSF"
+
+
 def create_navbar() -> dbc.Navbar:
     """创建顶部导航栏"""
     return dbc.Navbar(
@@ -29,17 +32,9 @@ def create_navbar() -> dbc.Navbar:
             dbc.Collapse(
                 dbc.Nav([
                     dbc.NavItem(dbc.NavLink([
-                        html.I(className="fas fa-history me-1"),
-                        "History"
-                    ], href="#", id="nav-history")),
-                    dbc.NavItem(dbc.NavLink([
-                        html.I(className="fas fa-book me-1"),
-                        "Documentation"
-                    ], href="#", id="nav-docs")),
-                    dbc.NavItem(dbc.NavLink([
                         html.I(className="fas fa-github me-1"),
                         "GitHub"
-                    ], href="https://github.com", target="_blank")),
+                    ], href=GITHUB_URL, target="_blank", external_link=True)),
                 ], className="ms-auto", navbar=True),
                 id="navbar-collapse",
                 navbar=True,
@@ -49,5 +44,3 @@ def create_navbar() -> dbc.Navbar:
         dark=True,
         className="mb-4 shadow"
     )
-
-

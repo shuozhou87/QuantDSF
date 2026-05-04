@@ -7,20 +7,100 @@ Analysis Callbacks
 """
 import base64
 import io
+import os
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash import Dash, callback, Input, Output, State, html, ctx, no_update
 import dash_bootstrap_components as dbc
 import time
-from multiprocessing import Pool, cpu_count
+import atexit
+import multiprocessing as _mp
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import cpu_count
+# Parallel strategy note:
+# - multiprocessing.Pool with 'spawn' (Python 3.13 macOS default) fails with
+#   BrokenPipeError because workers cannot re-import the package under the
+#   Dash launcher environment.
+# - 'fork' is unsafe when invoked from a threaded Flask/Dash request handler
+#   on macOS. BUT creating the fork pool at *module import time* — before any
+#   Flask threads exist — is safe, because forking a single-threaded process
+#   is well-defined. We then reuse the same pre-forked pool for all requests.
+# - scipy.optimize.curve_fit holds the GIL in its Python model callback, so
+#   threads do NOT give real parallelism here; real processes are required.
+# - Windows does not support 'fork'. Use a persistent thread pool there so the
+#   app can run locally; this favors portability over maximum throughput.
+try:
+    _pool_ctx = _mp.get_context('fork')
+    _pool_kind = 'fork'
+except ValueError:
+    _pool_ctx = None
+    _pool_kind = 'thread'
+
+_PERSISTENT_POOL = None
+
+
+def _analysis_worker_count():
+    """Return the analysis worker count, optionally capped for small cloud hosts."""
+    env_value = os.getenv("QUANTDSF_MAX_WORKERS")
+    if env_value:
+        try:
+            return max(1, int(env_value))
+        except ValueError:
+            print(f"[PARALLEL] Ignoring invalid QUANTDSF_MAX_WORKERS={env_value!r}")
+    return max(1, cpu_count() - 1)
+
+
+class _ThreadMapPool:
+    """Small Pool-compatible adapter for Windows where fork is unavailable."""
+
+    def __init__(self, processes):
+        self._executor = ThreadPoolExecutor(max_workers=processes)
+
+    def map(self, func, iterable):
+        return list(self._executor.map(func, iterable))
+
+    def close(self):
+        self._executor.shutdown(wait=True)
+
+    def join(self):
+        pass
+
+
+def _close_pool():
+    if _PERSISTENT_POOL is not None:
+        _PERSISTENT_POOL.close()
+        _PERSISTENT_POOL.join()
+
+
+def _get_pool():
+    global _PERSISTENT_POOL
+    if _PERSISTENT_POOL is None:
+        _n = _analysis_worker_count()
+        if _pool_kind == 'fork':
+            _PERSISTENT_POOL = _pool_ctx.Pool(processes=_n)
+        else:
+            _PERSISTENT_POOL = _ThreadMapPool(processes=_n)
+        atexit.register(_close_pool)
+    return _PERSISTENT_POOL
+
+# Note: actual pool fork happens at the END of this file, after all
+# worker functions (_process_single_sample, etc.) are defined, so the
+# forked workers inherit a complete module namespace.
 from functools import partial
 
-from core.io.parsers import parse_zip_file
+from core.io.parsers import (
+    parse_zip_file,
+    InvalidZipFileError,
+    NoValidDataError,
+    DataParsingError,
+    FileParsingError
+)
 from core.analysis.tm import calc_tm_auc, fit_boltzmann_model
 from core.database import HistoryRepository
 from core.qc import TmQualityController
 from core.qc.data_integrity import check_data_integrity
+
 
 
 def _process_single_sample(args):
@@ -72,6 +152,8 @@ def _process_single_sample(args):
     log_delta_bic = None
     dynamic_range_pct = None
     peak_snr = None
+    additional_peaks = None
+    deconv_r2 = None
 
     if method == 'auc':
         from core.analysis.tm import calc_tm_auc
@@ -107,9 +189,33 @@ def _process_single_sample(args):
 
     else:  # derivative
         from core.analysis.tm import compute_derivative, find_derivative_peaks
+
+        # Check if Gaussian deconvolution is requested (passed via cap dict)
+        deriv_peak_method = cap.get('derivative_peak_method', 'find_peaks')
+
         T_deriv, deriv = compute_derivative(T, F, use_tsb_smoothing=use_tsb_smoothing or False)
-        peaks = find_derivative_peaks(T_deriv, deriv)
-        tm = peaks[0][0] if peaks else np.nan
+        deconv_temp_range = cap.get('deconv_temp_range', None)
+        peaks = find_derivative_peaks(T_deriv, deriv, method=deriv_peak_method, temp_range=deconv_temp_range)
+
+        # For dual-peak: pick the most prominent peak as primary
+        if peaks and len(peaks) > 1:
+            primary_idx = max(range(len(peaks)), key=lambda i: abs(peaks[i][1]))
+            tm = peaks[primary_idx][0]
+        elif peaks:
+            tm = peaks[0][0]
+        else:
+            tm = np.nan
+
+        # Store additional peaks info if deconvolution produced them
+        additional_peaks = None
+        deconv_r2 = None
+        if deriv_peak_method == 'gaussian_deconvolution':
+            from core.analysis.tm.gaussian_deconv import deconvolute_dual_peaks
+            temp_range = cap.get('deconv_temp_range', None)
+            deconv = deconvolute_dual_peaks(T_deriv, deriv, temp_range=temp_range)
+            if deconv['success'] and len(deconv['peaks']) >= 2:
+                additional_peaks = deconv['peaks']
+                deconv_r2 = deconv['fit_r_squared']
 
         # Calculate Peak SNR
         if peaks and len(peaks) > 0:
@@ -178,6 +284,8 @@ def _process_single_sample(args):
         'F': F.tolist() if isinstance(F, np.ndarray) else F,
         'progress_curve': progress_curve if progress_curve is not None and not isinstance(progress_curve, np.ndarray) else (progress_curve.tolist() if progress_curve is not None else None),
         'progress_temperature': progress_temp if progress_temp is not None and not isinstance(progress_temp, np.ndarray) else (progress_temp.tolist() if progress_temp is not None else None),
+        'additional_peaks': additional_peaks,
+        'deconv_r_squared': deconv_r2,
     }
 
 
@@ -196,6 +304,17 @@ def register_analysis_callbacks(app: Dash) -> None:
         return f"{count} sample{'s' if count != 1 else ''}"
 
     @app.callback(
+        Output('deconv-temp-range-container', 'style'),
+        Input('dual-peak-checkbox', 'value'),
+        prevent_initial_call=True
+    )
+    def toggle_deconv_temp_range(dual_peak_enabled):
+        """Show/hide temperature range inputs based on dual-peak checkbox."""
+        if dual_peak_enabled:
+            return {"display": "block"}
+        return {"display": "none"}
+
+    @app.callback(
         Output('analysis-results-store', 'data', allow_duplicate=True),
         Output('results-table-container', 'children', allow_duplicate=True),
         Input('results-datatable', 'data'),
@@ -211,20 +330,22 @@ def register_analysis_callbacks(app: Dash) -> None:
         updated = False
 
         # 处理用户编辑
-        for i, row in enumerate(table_data):
-            if i >= len(results):
-                break
+        for row in table_data:
+            # CRITICAL FIX: Use _original_index to map back to correct result
+            # Table is sorted by concentration, but results array is in original order
+            original_idx = row.get('_original_index')
+            if original_idx is None or original_idx >= len(results):
+                continue
 
             # 处理 Sample 名称编辑
             new_sample_name = row.get('Sample', '').strip()
-            if new_sample_name and new_sample_name != results[i]['name']:
+            if new_sample_name and new_sample_name != results[original_idx]['name']:
                 # 保存原始名称到自定义映射
-                original_name = results[i].get('original_name', results[i]['name'])
-                if 'original_name' not in results[i]:
-                    results[i]['original_name'] = results[i]['name']
+                if 'original_name' not in results[original_idx]:
+                    results[original_idx]['original_name'] = results[original_idx]['name']
 
                 # 更新显示名称
-                results[i]['name'] = new_sample_name
+                results[original_idx]['name'] = new_sample_name
                 updated = True
 
             # 处理浓度编辑 (保留原有逻辑)
@@ -233,8 +354,8 @@ def register_analysis_callbacks(app: Dash) -> None:
                 try:
                     # 直接解析为浮点数,默认单位为M
                     conc_val = float(conc_str.strip())
-                    if results[i].get('concentration') != conc_val:
-                        results[i]['concentration'] = conc_val
+                    if results[original_idx].get('concentration') != conc_val:
+                        results[original_idx]['concentration'] = conc_val
                         updated = True
                 except (ValueError, AttributeError):
                     # 解析失败,保持原值
@@ -252,20 +373,31 @@ def register_analysis_callbacks(app: Dash) -> None:
         Output('derivative-panel', 'style'),
         Input('results-datatable', 'selected_rows'),
         State('analysis-results-store', 'data'),
+        State('results-datatable', 'data'),
         prevent_initial_call=True
     )
-    def update_plots_from_selection(selected_rows, results_data):
+    def update_plots_from_selection(selected_rows, results_data, table_data):
         """根据表格选择更新图表"""
         if not results_data or not results_data.get('results'):
             return no_update, no_update, no_update
 
         all_results = results_data['results']
 
-        # 如果没有选中任何行,显示所有数据
+        # Map selected table rows back to original result indices via _original_index
         if not selected_rows:
             selected_results = all_results
+        elif table_data:
+            selected_results = []
+            for row_idx in selected_rows:
+                if row_idx < len(table_data):
+                    original_idx = table_data[row_idx].get('_original_index', row_idx)
+                    if original_idx < len(all_results):
+                        selected_results.append(all_results[original_idx])
+            if not selected_results:
+                selected_results = all_results
         else:
-            selected_results = [all_results[i] for i in selected_rows]
+            # Fallback if table_data not available
+            selected_results = [all_results[i] for i in selected_rows if i < len(all_results)]
 
         # 更新melting curves
         melting_fig = _create_melting_curves_plot(selected_results)
@@ -297,17 +429,22 @@ def register_analysis_callbacks(app: Dash) -> None:
         Output('tm-distribution-plot', 'figure'),
         Output('derivative-curves-plot', 'figure', allow_duplicate=True),
         Output('derivative-panel', 'style', allow_duplicate=True),
+        Output('analysis-error-alert', 'children'),
+        Output('analysis-error-alert', 'is_open'),
         Input('run-analysis-btn', 'n_clicks'),
         State('upload-data', 'contents'),
         State('upload-data', 'filename'),
         State('method-selector', 'value'),
         State('channel-selector', 'value'),
         State('fd-use-tsb-smoothing-checkbox', 'value'),
+        State('dual-peak-checkbox', 'value'),
+        State('deconv-temp-min', 'value'),
+        State('deconv-temp-max', 'value'),
         State('thermodynamic-method-radio', 'value'),
         State('analysis-results-store', 'data'),
         prevent_initial_call=True
     )
-    def run_tm_analysis(n_clicks, contents_list, filenames, method, channel, use_tsb_smoothing, thermodynamic_method, previous_results_data):
+    def run_tm_analysis(n_clicks, contents_list, filenames, method, channel, use_tsb_smoothing, dual_peak_enabled, deconv_temp_min, deconv_temp_max, thermodynamic_method, previous_results_data):
         """
         运行 Tm 分析
 
@@ -329,8 +466,11 @@ def register_analysis_callbacks(app: Dash) -> None:
                 no_update,
                 no_update,
                 no_update,
-                no_update
+                no_update,
+                "",  # error message
+                False  # error alert closed
             )
+
         
         # 确保是列表
         if not isinstance(contents_list, list):
@@ -382,15 +522,25 @@ def register_analysis_callbacks(app: Dash) -> None:
                     no_update,
                     no_update,
                     no_update,
-                    no_update
+                    no_update,
+                    "",  # error message
+                    False  # error alert closed
                 )
+
             
             # 对每个毛细管计算 Tm
             t_compute_start = time.time()
 
-            # Determine number of CPU cores to use
-            n_cores = max(1, cpu_count() - 1)  # Leave one core for system
+            # Determine number of analysis workers to use
+            n_cores = _analysis_worker_count()
             use_parallel = len(all_capillaries) >= 10  # Only use parallel for 10+ samples
+
+            # Inject derivative_peak_method and temp range into each capillary dict if dual-peak is enabled
+            if dual_peak_enabled and method == 'derivative':
+                for cap in all_capillaries:
+                    cap['derivative_peak_method'] = 'gaussian_deconvolution'
+                    if deconv_temp_min is not None and deconv_temp_max is not None:
+                        cap['deconv_temp_range'] = (float(deconv_temp_min), float(deconv_temp_max))
 
             if use_parallel:
                 print(f"[PARALLEL] Using {n_cores} CPU cores for {len(all_capillaries)} samples")
@@ -398,9 +548,9 @@ def register_analysis_callbacks(app: Dash) -> None:
                 # Prepare arguments for parallel processing
                 args_list = [(cap, method, use_tsb_smoothing) for cap in all_capillaries]
 
-                # Process in parallel
-                with Pool(processes=n_cores) as pool:
-                    all_results = pool.map(_process_single_sample, args_list)
+                # Reuse a persistent fork-pool created at module import time
+                pool = _get_pool()
+                all_results = pool.map(_process_single_sample, args_list)
 
                 computation_times = []  # Not tracking individual times in parallel mode
                 print(f"[PARALLEL] Parallel computation completed")
@@ -588,21 +738,140 @@ def register_analysis_callbacks(app: Dash) -> None:
                 curves_fig,
                 dist_fig,
                 derivative_fig,
-                derivative_style
+                derivative_style,
+                "",  # No error message
+                False  # Error alert closed
             )
 
-        except Exception as e:
+
+        except InvalidZipFileError as e:
             import traceback
-            print(f"ERROR in run_tm_analysis: {e}")
+            print(f"[ERROR] Invalid ZIP file: {e}")
             print(traceback.format_exc())
+
+            error_msg = html.Div([
+                html.Div([
+                    html.I(className="fas fa-exclamation-triangle fa-2x me-3"),
+                    html.H5("Invalid ZIP File", className="mb-0", style={'display': 'inline-block'})
+                ], className="d-flex align-items-center mb-3"),
+                html.P([
+                    "The uploaded file is not a valid ZIP archive or is corrupted. ",
+                    html.Br(),
+                    "Please ensure you're uploading a ZIP file exported from NanoTemper instruments."
+                ], style={'fontSize': '15px', 'lineHeight': '1.6'}),
+                html.Details([
+                    html.Summary("Technical Details", className="text-muted small", style={'cursor': 'pointer'}),
+                    html.Pre(str(e), className="text-muted small mt-2", style={'fontSize': '11px'})
+                ])
+            ])
+
             return (
                 no_update,
                 no_update,
                 no_update,
                 no_update,
                 no_update,
-                no_update
+                no_update,
+                error_msg,
+                True  # Show error alert
             )
+
+        except NoValidDataError as e:
+            import traceback
+            print(f"[ERROR] No valid data found: {e}")
+            print(traceback.format_exc())
+
+            error_msg = html.Div([
+                html.Div([
+                    html.I(className="fas fa-search fa-2x me-3"),
+                    html.H5("No Valid Data Found", className="mb-0", style={'display': 'inline-block'})
+                ], className="d-flex align-items-center mb-3"),
+                html.P([
+                    "No valid nanoDSF data could be found in the uploaded ZIP file. ",
+                    html.Br(),
+                    "Please check that the ZIP contains CSV or XLSX files from Prometheus NT.48 or Tycho NT.6 instruments."
+                ], style={'fontSize': '15px', 'lineHeight': '1.6'}),
+                html.Details([
+                    html.Summary("Technical Details", className="text-muted small", style={'cursor': 'pointer'}),
+                    html.Pre(str(e), className="text-muted small mt-2", style={'fontSize': '11px'})
+                ])
+            ])
+
+            return (
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                error_msg,
+                True  # Show error alert
+            )
+
+        except DataParsingError as e:
+            import traceback
+            print(f"[ERROR] Data parsing failed: {e}")
+            print(traceback.format_exc())
+
+            error_msg = html.Div([
+                html.Div([
+                    html.I(className="fas fa-file-excel fa-2x me-3"),
+                    html.H5("Data Parsing Error", className="mb-0", style={'display': 'inline-block'})
+                ], className="d-flex align-items-center mb-3"),
+                html.P([
+                    "Failed to parse data from one or more files. ",
+                    html.Br(),
+                    "The files may be corrupted or in an unexpected format."
+                ], style={'fontSize': '15px', 'lineHeight': '1.6'}),
+                html.Details([
+                    html.Summary("Technical Details", className="text-muted small", style={'cursor': 'pointer'}),
+                    html.Pre(str(e), className="text-muted small mt-2", style={'fontSize': '11px'})
+                ])
+            ])
+
+            return (
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                error_msg,
+                True  # Show error alert
+            )
+
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] Unexpected error in run_tm_analysis: {e}")
+            print(traceback.format_exc())
+
+            error_msg = html.Div([
+                html.Div([
+                    html.I(className="fas fa-bug fa-2x me-3"),
+                    html.H5("Unexpected Error", className="mb-0", style={'display': 'inline-block'})
+                ], className="d-flex align-items-center mb-3"),
+                html.P([
+                    "An unexpected error occurred during analysis. ",
+                    html.Br(),
+                    "Please check the console for details or contact support."
+                ], style={'fontSize': '15px', 'lineHeight': '1.6'}),
+                html.Details([
+                    html.Summary("Technical Details", className="text-muted small", style={'cursor': 'pointer'}),
+                    html.Pre(f"{type(e).__name__}: {str(e)}", className="text-muted small mt-2", style={'fontSize': '11px'})
+                ])
+            ])
+
+            return (
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                error_msg,
+                True  # Show error alert
+            )
+
 
 
 def _map_channel(channel: str) -> str:
@@ -628,15 +897,22 @@ def _create_results_table(results: list):
     # Check if thermodynamic data is available
     has_thermo_data = any(r.get('delta_G_std') is not None for r in results)
 
+    # Check if dual-peak data is available
+    has_dual_peaks = any(
+        r.get('additional_peaks') and len(r.get('additional_peaks', [])) >= 2
+        for r in results
+    )
+
     # 按浓度排序（低到高），无浓度的排在最后
+    # CRITICAL: Add _original_index to preserve mapping after sorting
     sorted_results = sorted(
-        results,
-        key=lambda r: (r.get('concentration') is None, r.get('concentration') or float('inf'))
+        enumerate(results),  # Preserve original index
+        key=lambda x: (x[1].get('concentration') is None, x[1].get('concentration') or float('inf'))
     )
 
     # 准备数据
     table_data = []
-    for i, r in enumerate(sorted_results):
+    for display_idx, (original_idx, r) in enumerate(sorted_results):
         conc_str = format_concentration(r['concentration']) if r['concentration'] else 'N/A'
         tm_str = f"{r['tm']:.1f}" if r['tm'] is not None else 'N/A'
 
@@ -665,7 +941,7 @@ def _create_results_table(results: list):
                 status_tooltip = "Analysis failed or Tm not found"
 
         row_data = {
-            'index': i,
+            '_original_index': original_idx,  # Store original index for edit callback
             'Sample': r['name'],
             'Concentration (M)': conc_str,
             'Tm (°C)': tm_str,
@@ -674,6 +950,18 @@ def _create_results_table(results: list):
             'Status': r['quality_flag'],
             'Status_tooltip': status_tooltip  # 添加tooltip数据
         }
+
+        # Add dual-peak Tm values if available
+        if has_dual_peaks:
+            peaks = r.get('additional_peaks', [])
+            if peaks and len(peaks) >= 2:
+                row_data['Peak 1 (°C)'] = f"{peaks[0]['tm']:.1f}"
+                row_data['Peak 2 (°C)'] = f"{peaks[1]['tm']:.1f}"
+                row_data['Deconv R²'] = f"{r.get('deconv_r_squared', 0):.3f}" if r.get('deconv_r_squared') else 'N/A'
+            else:
+                row_data['Peak 1 (°C)'] = tm_str  # fallback to single Tm
+                row_data['Peak 2 (°C)'] = '—'
+                row_data['Deconv R²'] = '—'
 
         # Add thermodynamic parameters if available
         if has_thermo_data:
@@ -690,10 +978,21 @@ def _create_results_table(results: list):
         {"name": "Sample", "id": "Sample", "editable": True},
         {"name": "Concentration (M)", "id": "Concentration (M)", "editable": True},
         {"name": "Tm (°C)", "id": "Tm (°C)", "editable": False},
+    ]
+
+    # Add dual-peak columns if available
+    if has_dual_peaks:
+        columns.extend([
+            {"name": "Peak 1 (°C)", "id": "Peak 1 (°C)", "editable": False},
+            {"name": "Peak 2 (°C)", "id": "Peak 2 (°C)", "editable": False},
+            {"name": "Deconv R²", "id": "Deconv R²", "editable": False},
+        ])
+
+    columns.extend([
         {"name": quality_col_header, "id": quality_col_header, "editable": False},
         {"name": "Method", "id": "Method", "editable": False},
         {"name": "Status", "id": "Status", "editable": False}
-    ]
+    ])
 
     # Add thermodynamic columns if data is available
     if has_thermo_data:
@@ -1128,3 +1427,12 @@ def register_loading_message_callback(app: Dash):
         # 默认消息
         return '⚙️ Ready to analyze...'
 
+
+# ---------------------------------------------------------------------------
+# Eagerly fork the worker pool NOW, at the end of this module. All functions
+# (_process_single_sample, etc.) are defined by this point, so the forked
+# children inherit a complete module namespace and can execute pool.map
+# tasks immediately. This must run during module import, before the Flask
+# server starts its request threads (fork-from-thread is unsafe on macOS).
+# ---------------------------------------------------------------------------
+_get_pool()

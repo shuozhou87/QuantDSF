@@ -76,19 +76,7 @@ def _create_basic_analysis_initial_layout():
                                 )
                             ], id='melting-curves-column')
                         ),
-                        # Tab 2: Tm Distribution
-                        dbc.Tab(
-                            label="📊 Tm Distribution",
-                            tab_id="plot-tm-dist",
-                            children=html.Div([
-                                dcc.Graph(
-                                    id='tm-distribution-plot',
-                                    figure=_create_empty_figure("Upload data and run analysis"),
-                                    style={'height': '55vh'}
-                                )
-                            ], id='tm-dist-column')
-                        ),
-                        # Tab 3: First Derivative (conditional)
+                        # Tab 2: First Derivative (conditional)
                         dbc.Tab(
                             label="📉 First Derivative",
                             tab_id="plot-derivative",
@@ -100,7 +88,15 @@ def _create_basic_analysis_initial_layout():
                                 )
                             ], id='derivative-panel')
                         ),
-                    ], id="basic-plot-tabs", active_tab="plot-melting")
+                    ], id="basic-plot-tabs", active_tab="plot-melting"),
+                    html.Div(
+                        dcc.Graph(
+                            id='tm-distribution-plot',
+                            figure=_create_empty_figure("Tm Distribution is temporarily unavailable"),
+                        ),
+                        id='tm-dist-column',
+                        style={'display': 'none'}
+                    )
                 ], className="p-2")
             ], className="shadow-sm"),
         ]),
@@ -214,4 +210,3 @@ def create_main_layout() -> dbc.Container:
         ], className="mt-4")
         
     ], fluid=True, className="px-4")
-

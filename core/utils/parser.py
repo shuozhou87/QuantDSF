@@ -296,9 +296,11 @@ def clean_sample_name(filename: str) -> str:
         r'[_\-\s]*350\s*nm[_\-\s]*',
         r'[_\-\s]*ratio[_\-\s]*',
         # 浓度模式（科学计数法）
-        r'[_\-\s]*\d+\.?\d*[eE][+-]?\d+[_\-\s]*',
+        # 改进：允许可选的尾随 M/m
+        r'[_\-\s]*\d+\.?\d*[eE][+-]?\d+(?:[_\-\s]*[mM])?[_\-\s]*',
         # 浓度模式（带单位）
-        r'[_\-\s]*\d+\.?\d*\s*[fFpPnNuUµμmM]?[mM][_\-\s]*',
+        # 改进：允许数字和单位之间有分隔符，并允许可选的尾随 M/m
+        r'[_\-\s]*\d+\.?\d*[_\-\s]*[fFpPnNuUµμmM]?[mM](?:[_\-\s]*[mM])?[_\-\s]*',
         # 占位浓度 "_0_" 或类似模式
         r'[_\-\s]+0[_\-\s]+',
         # 移除独立的小数浓度值（如 "_0.05_"）
@@ -310,6 +312,9 @@ def clean_sample_name(filename: str) -> str:
         r'[_\-\s]*smoothed[_\-\s]*',
         r'[_\-\s]*derivative[_\-\s]*',
         r'[_\-\s]*firstderivative[_\-\s]*',
+        # 移除副本标记 (1), (2) 等
+        r'[_\-\s]*\(\d+\)[_\-\s]*',
+        r'[_\-\s]*copy[_\-\s]*',
     ]
 
     # 应用所有移除模式（多次迭代确保彻底清理）
@@ -319,10 +324,10 @@ def clean_sample_name(filename: str) -> str:
 
     # 清理多余的分隔符
     # 移除开头和结尾的分隔符
-    name = name.strip('_- ')
+    name = name.strip('_-+ ')
 
-    # 将多个连续分隔符替换为单个下划线
-    name = re.sub(r'[_\-\s]+', '_', name)
+    # 将多个连续分隔符（包括加号）替换为单个下划线
+    name = re.sub(r'[_\-\s\+]+', '_', name)
 
     # 再次清理边缘
     name = name.strip('_- ')

@@ -99,21 +99,16 @@ def _create_basic_analysis_content(results_data) -> html.Div:
                             )
                         ])
                     ], className="shadow-sm")
-                ], id='melting-curves-column', md=6),
-
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("📊 Tm Distribution"),
-                        dbc.CardBody([
-                            dcc.Graph(
-                                id='tm-distribution-plot',
-                                figure=_create_empty_figure("Upload data to see Tm distribution"),
-                                style={'height': '400px'}
-                            )
-                        ])
-                    ], className="shadow-sm")
-                ], id='tm-dist-column', md=6),
+                ], id='melting-curves-column', md=12),
             ]),
+            html.Div(
+                dcc.Graph(
+                    id='tm-distribution-plot',
+                    figure=_create_empty_figure("Tm Distribution is temporarily unavailable")
+                ),
+                id='tm-dist-column',
+                style={'display': 'none'}
+            ),
             
         ], className="p-3")
     
@@ -149,17 +144,16 @@ def _create_basic_analysis_content(results_data) -> html.Div:
                         dcc.Graph(id='melting-curves-plot', style={'height': '400px'})
                     ])
                 ], className="shadow-sm")
-            ], id='melting-curves-column', md=6),
-
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader("📊 Tm Distribution"),
-                    dbc.CardBody([
-                        dcc.Graph(id='tm-distribution-plot', style={'height': '400px'})
-                    ])
-                ], className="shadow-sm")
-            ], id='tm-dist-column', md=6),
+            ], id='melting-curves-column', md=12),
         ]),
+        html.Div(
+            dcc.Graph(
+                id='tm-distribution-plot',
+                figure=_create_empty_figure("Tm Distribution is temporarily unavailable")
+            ),
+            id='tm-dist-column',
+            style={'display': 'none'}
+        ),
 
     ], className="p-3")
 
@@ -400,6 +394,19 @@ def _create_dose_response_content(results_data) -> html.Div:
                                 html.Div([
                                     html.I(className="fas fa-check-square me-2"),
                                     html.Span(id="dr-selection-hint", className="text-muted small"),
+                                    # Peak selector (hidden by default, shown when dual-peak data available)
+                                    html.Span([
+                                        dbc.Select(
+                                            id="dr-peak-selector",
+                                            options=[
+                                                {"label": "Primary Peak", "value": "primary"},
+                                            ],
+                                            value="primary",
+                                            size="sm",
+                                            style={"width": "160px", "display": "inline-block", "fontSize": "11px"}
+                                        ),
+                                    ], id="dr-peak-selector-container", style={"display": "none"},
+                                       className="float-end me-2"),
                                     dbc.Button(
                                         [html.I(className="fas fa-calculator me-1"), "Calculate EC50"],
                                         id="dr-run-btn",
@@ -482,7 +489,7 @@ def _create_dose_response_content(results_data) -> html.Div:
         
         # Hidden elements for SFQ collapse (keep for callback compatibility)
         html.Div(id="sfq-card-header", style={"display": "none"}),
-        html.Div(id="sfq-collapse", style={"display": "none"}),
+        dbc.Collapse(id="sfq-collapse", is_open=False, style={"display": "none"}),
         
     ], className="p-3")
 
@@ -499,4 +506,3 @@ def _create_empty_figure(message: str) -> go.Figure:
     )
     fig.update_layout(template='plotly_white')
     return fig
-

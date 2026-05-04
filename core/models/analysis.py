@@ -86,7 +86,22 @@ class TmResult(BaseModel):
         None,
         description="导数峰宽度"
     )
-    
+
+    # Multi-peak (Gaussian deconvolution)
+    additional_peaks: Optional[List[dict]] = Field(
+        None,
+        description="Additional peaks from Gaussian deconvolution. "
+                    "Each dict has: tm, amplitude, width, area, peak_label"
+    )
+    deconv_r_squared: Optional[float] = Field(
+        None,
+        description="R² of the Gaussian deconvolution fit"
+    )
+    deconv_baseline: Optional[float] = Field(
+        None,
+        description="Baseline offset from Gaussian deconvolution"
+    )
+
     # 质量控制
     quality_flag: str = Field(
         "✓",
@@ -106,6 +121,21 @@ class TmResult(BaseModel):
         """结果是否有效"""
         return self.quality_flag == "✓" and self.r_squared >= 0.9
     
+    @property
+    def all_tms(self) -> List[float]:
+        """All Tm values (primary + additional peaks), sorted by temperature."""
+        tms = [self.tm]
+        if self.additional_peaks:
+            tms.extend(p['tm'] for p in self.additional_peaks)
+        return sorted(set(tms))
+
+    @property
+    def num_peaks(self) -> int:
+        """Number of detected peaks."""
+        if self.additional_peaks:
+            return len(self.additional_peaks)
+        return 1
+
     @property
     def ci_lower(self) -> Optional[float]:
         """置信区间下限"""

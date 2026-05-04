@@ -163,7 +163,7 @@ class AnalysisPipeline:
         self.ec50_data = compute_isothermal_ec50(
             T_grid, concentrations, Y_folded,
             min_dynamic_range=self.config.min_dynamic_range,
-            min_r2=self.config.min_4pl_r2
+            min_4pl_r2=self.config.min_4pl_r2
         )
         
         # 更新 KD（如果有蛋白浓度）
@@ -226,5 +226,4 @@ class AnalysisPipeline:
         self._data_loaded = False
         self._tm_analyzed = False
         self._thermo_analyzed = False
-
 

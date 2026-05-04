@@ -28,14 +28,24 @@ env/
 *.log.*
 
 # Test data and sample datasets
-SampleDataSets/
+SampleDataSets/*
+!SampleDataSets/DOSE/
+!SampleDataSets/SP/
+!SampleDataSets/SFQ/
+!SampleDataSets/DOSE/*.zip
+!SampleDataSets/SP/*.zip
+!SampleDataSets/SFQ/*.zip
 auc_diagnostics/
 
 # Debug files
 debug/
 debug_*.py
+reproduce_issue.py
 test_*.py
 *_debug.log
+chrome-headless-profile/
+edge-headless-profile/
+quantdsf_screen_capture.png
 
 # Backup and legacy
 _backup_v1/

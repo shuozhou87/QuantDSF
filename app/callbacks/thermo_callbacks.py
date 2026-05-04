@@ -437,7 +437,7 @@ def register_thermo_callbacks(app: Dash) -> None:
                         font=dict(size=14, color="gray")
                     )
                     fig.update_layout(template='plotly_white')
-                    return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--", html.Div()
+                    return fig, "-- kJ/mol", "-- J/mol·K", "-- nM", "--", "--", html.Div(), no_update
                 selected = [table_data[i] for i in selected_rows if i < len(table_data)]
                 valid_points = []
                 for row in selected:
@@ -650,7 +650,7 @@ def register_thermo_callbacks(app: Dash) -> None:
                 font=dict(size=14, color="red")
             )
             fig.update_layout(template='plotly_white')
-            return fig, "Error", "Error", "Error", "--", "--", html.Div()
+            return fig, "Error", "Error", "Error", "--", "--", html.Div(), no_update
 
 
     @app.callback(
@@ -952,4 +952,3 @@ def register_thermo_callbacks(app: Dash) -> None:
             except Exception:
                 continue
         return rows
-

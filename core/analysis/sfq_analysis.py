@@ -872,7 +872,8 @@ def analyze_sfq_channel(
     elif delta_aic < delta_aic_moderate:
         # Weak AIC evidence - likely non-specific
         status = 'Not detected'
-        notes_parts.append(f"Non-specific model fits equally well (ΔAIC={delta_aic:.1f}, SI={si:.3f})")
+        si_str = f"{si:.3f}" if si is not None else "N/A"
+        notes_parts.append(f"Non-specific model fits equally well (ΔAIC={delta_aic:.1f}, SI={si_str})")
     else:
         # 4PL is at least moderately better
         mode = fourpl_result['mode']

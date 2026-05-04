@@ -432,6 +432,16 @@ def register_dose_response_callbacks(app: Dash) -> None:
     """Register dose-response analysis callbacks"""
 
     @app.callback(
+        Output('dose-response-store', 'data', allow_duplicate=True),
+        Input('analysis-results-store', 'data'),
+        prevent_initial_call=True
+    )
+    def clear_dr_store_on_reanalysis(results_data):
+        """Clear dose-response store when basic analysis is re-run (e.g. channel change).
+        This prevents stale SFQ results from being displayed."""
+        return None
+
+    @app.callback(
         Output('dr-selection-table', 'data'),
         Output('dr-selection-table', 'selected_rows'),
         Output('dr-selection-hint', 'children'),
@@ -486,6 +496,41 @@ def register_dose_response_callbacks(app: Dash) -> None:
         return rows, auto_selected, hint
 
     @app.callback(
+        Output('dr-peak-selector-container', 'style'),
+        Output('dr-peak-selector', 'options'),
+        Output('dr-peak-selector', 'value'),
+        Input('analysis-results-store', 'data'),
+        Input('main-tabs', 'active_tab'),
+        prevent_initial_call=True
+    )
+    def update_peak_selector(results_data, active_tab):
+        """Show/hide peak selector based on whether dual-peak data is available."""
+        hidden = {"display": "none"}
+        default_options = [{"label": "Primary Peak", "value": "primary"}]
+
+        if active_tab != 'dose' or not results_data or not results_data.get('results'):
+            return hidden, default_options, "primary"
+
+        # Check if any result has additional_peaks
+        has_dual_peaks = any(
+            r.get('additional_peaks') and len(r.get('additional_peaks', [])) >= 2
+            for r in results_data['results']
+        )
+
+        if has_dual_peaks:
+            # Get representative peak info from first sample with dual peaks
+            for r in results_data['results']:
+                peaks = r.get('additional_peaks', [])
+                if len(peaks) >= 2:
+                    options = [
+                        {"label": f"Peak 1 ({peaks[0]['tm']:.1f}°C)", "value": "peak_0"},
+                        {"label": f"Peak 2 ({peaks[1]['tm']:.1f}°C)", "value": "peak_1"},
+                    ]
+                    return {"display": "inline-block"}, options, "peak_0"
+
+        return hidden, default_options, "primary"
+
+    @app.callback(
         Output('dr-ec50-results', 'children'),
         Output('dose-response-plot', 'figure'),
         Output('dose-response-store', 'data'),
@@ -496,10 +541,11 @@ def register_dose_response_callbacks(app: Dash) -> None:
         State('dr-selection-table', 'selected_rows'),
         State('dr-selection-table', 'data'),
         State('channel-selector', 'value'),
-        State('dose-response-store', 'data'), # Added store state
-        prevent_initial_call='initial_duplicate' # Changed to 'initial_duplicate' to allow restore AND duplicate output
+        State('dose-response-store', 'data'),
+        State('dr-peak-selector', 'value'),
+        prevent_initial_call='initial_duplicate'
     )
-    def run_dose_response_analysis(n_clicks, results_data, selected_rows, table_data, channel, existing_dr_data):
+    def run_dose_response_analysis(n_clicks, results_data, selected_rows, table_data, channel, existing_dr_data, selected_peak):
         """Run dose-response EC50 analysis"""
         # Empty figure
         fig = go.Figure()
@@ -574,7 +620,17 @@ def register_dose_response_callbacks(app: Dash) -> None:
                 if original_idx < len(results):
                     r = results[original_idx]
                     conc = r.get('concentration')
-                    tm = r.get('tm')
+
+                    # Use selected peak Tm if dual-peak mode is active
+                    if selected_peak and selected_peak.startswith('peak_'):
+                        peak_idx = int(selected_peak.split('_')[1])
+                        peaks = r.get('additional_peaks', [])
+                        if peaks and peak_idx < len(peaks):
+                            tm = peaks[peak_idx]['tm']
+                        else:
+                            tm = r.get('tm')  # fallback to primary
+                    else:
+                        tm = r.get('tm')
 
                     if conc is not None and tm is not None and np.isfinite(conc) and np.isfinite(tm) and conc > 0:
                         concentrations.append(conc)

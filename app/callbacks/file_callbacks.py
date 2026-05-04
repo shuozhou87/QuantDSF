@@ -10,6 +10,9 @@ from dash import Dash, callback, Input, Output, State, html, ctx, ALL, no_update
 import dash_bootstrap_components as dbc
 import base64
 import io
+from pathlib import Path
+
+from app.example_datasets import get_example_dataset, resolve_dataset_files
 
 
 def register_file_callbacks(app: Dash) -> None:
@@ -73,33 +76,49 @@ def register_file_callbacks(app: Dash) -> None:
     @app.callback(
         Output('upload-data', 'contents', allow_duplicate=True),
         Output('upload-data', 'filename', allow_duplicate=True),
-        Input('load-test-data-btn', 'n_clicks'),
+        Output('method-selector', 'value'),
+        Output('channel-selector', 'value'),
+        Output('thermodynamic-method-radio', 'value'),
+        Output('dual-peak-checkbox', 'value'),
+        Input('load-example-data-btn', 'n_clicks'),
+        State('example-dataset-selector', 'value'),
         prevent_initial_call=True
     )
-    def load_test_data(n_clicks):
-        """加载测试数据集用于调试"""
+    def load_example_data(n_clicks, dataset_id):
+        """Load a curated manuscript example dataset."""
         if not n_clicks:
-            return no_update, no_update
-        
-        import os
-        # 测试数据路径
-        test_file_path = "/Users/shuozhou/Library/CloudStorage/OneDrive-UTHealthSanAntonio/QuantDSF/QuantDSF/SampleDataSets/DOSE/RPA+SSDNA_13406_DOSE.zip"
-        
-        if not os.path.exists(test_file_path):
-            print(f"[ERROR] Test file not found: {test_file_path}")
-            return no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update, no_update
+
+        dataset = get_example_dataset(dataset_id)
+        if dataset is None:
+            print(f"[ERROR] Unknown example dataset: {dataset_id}")
+            return no_update, no_update, no_update, no_update, no_update, no_update
+
+        project_root = Path(__file__).resolve().parents[2]
+        dataset_paths = list(resolve_dataset_files(dataset, project_root))
+        missing = [str(path) for path in dataset_paths if not path.exists()]
+        if missing:
+            print(f"[ERROR] Example dataset file(s) not found: {missing}")
+            return no_update, no_update, no_update, no_update, no_update, no_update
         
         try:
-            with open(test_file_path, 'rb') as f:
-                file_content = f.read()
-            
-            # Encode as base64 for Dash upload component
-            encoded = base64.b64encode(file_content).decode('utf-8')
-            content_string = f"data:application/zip;base64,{encoded}"
-            
-            print(f"[DEBUG] Loaded test file: {os.path.basename(test_file_path)}")
-            return [content_string], ["RPA+SSDNA_13406_DOSE.zip"]
-        except Exception as e:
-            print(f"[ERROR] Failed to load test file: {e}")
-            return no_update, no_update
+            contents = []
+            filenames = []
+            for dataset_path in dataset_paths:
+                with dataset_path.open('rb') as f:
+                    encoded = base64.b64encode(f.read()).decode('utf-8')
+                contents.append(f"data:application/zip;base64,{encoded}")
+                filenames.append(dataset_path.name)
 
+            print(f"[DEBUG] Loaded example dataset: {dataset.label}")
+            return (
+                contents,
+                filenames,
+                dataset.method,
+                dataset.channel,
+                dataset.thermodynamic_method,
+                dataset.dual_peak,
+            )
+        except Exception as e:
+            print(f"[ERROR] Failed to load example dataset: {e}")
+            return no_update, no_update, no_update, no_update, no_update, no_update
